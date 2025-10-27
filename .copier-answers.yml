@@ -1,0 +1,14 @@
+# Changes here will be overwritten by Copier
+Authors: Germán Morales-España <german.morales@tno.nl>, Juan Giraldo Chavarriaga <juan.giraldo@tno.nl>,
+    Muhammad Numan <muhammad.numan@ucd.ie>, Ni Wang <ni.wang@tno.nl>
+JuliaMinVersion: '1.10'
+License: Apache-2.0
+LicenseCopyrightHolders: Germán Morales-España, Juan Giraldo Chavarriaga, Muhammad
+    Numan, Ni Wang
+PackageName: NetworkReduction
+PackageOwner: TulipaEnergy
+PackageUUID: 8d6c9889-004b-5ffc-a588-babdd84958c6
+StrategyConfirmIncluded: false
+StrategyLevel: 3
+StrategyReviewExcluded: false
+_src_path: C:\Users\wangn\.julia\packages\BestieTemplate\jdG8v

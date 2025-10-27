@@ -1,0 +1,16 @@
+# Go to https://citation-file-format.github.io/cff-initializer-javascript/#/ to finish this
+cff-version: 1.2.0
+title: NetworkReduction.jl
+message: >-
+  If you use this software, please cite it using the
+  metadata from this file.
+type: software
+authors:
+  - given-names: Germán Morales-España
+    email: german.morales@tno.nl
+  - given-names: Juan Giraldo Chavarriaga
+    email: juan.giraldo@tno.nl
+  - given-names: Muhammad Numan
+    email: muhammad.numan@ucd.ie
+  - given-names: Ni Wang
+    email: ni.wang@tno.nl
