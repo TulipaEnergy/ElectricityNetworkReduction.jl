@@ -1,4 +1,6 @@
-# Go to https://citation-file-format.github.io/cff-initializer-javascript/#/ to finish this
+# This CITATION.cff file was generated with cffinit.
+# Visit https://bit.ly/cffinit to generate yours today!
+
 cff-version: 1.2.0
 title: NetworkReduction.jl
 message: >-
@@ -6,11 +8,23 @@ message: >-
   metadata from this file.
 type: software
 authors:
-  - given-names: Germán Morales-España
+  - given-names: Germán
+    family-names: Morales-España
     email: german.morales@tno.nl
-  - given-names: Juan Giraldo Chavarriaga
+    affiliation: TNO
+    orcid: 'https://orcid.org/0000-0002-6372-6197'
+  - given-names: Juan
+    family-names: Giraldo Chavarriaga
     email: juan.giraldo@tno.nl
-  - given-names: Muhammad Numan
+    affiliation: TNO
+    orcid: 'https://orcid.org/0000-0003-2154-1618'
+  - given-names: Muhammad
+    family-names: Numan
     email: muhammad.numan@ucd.ie
-  - given-names: Ni Wang
+    orcid: 'https://orcid.org/0000-0001-7069-144X'
+    affiliation: University College Dublin
+  - given-names: Ni
+    family-names: Wang
     email: ni.wang@tno.nl
+    affiliation: TNO
+    orcid: 'https://orcid.org/0000-0001-7037-7004'
