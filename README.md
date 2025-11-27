@@ -11,7 +11,7 @@
 [![All Contributors](https://img.shields.io/github/all-contributors/TulipaEnergy/NetworkReduction.jl?labelColor=5e1ec7&color=c0ffee&style=flat-square)](#contributors)
 [![BestieTemplate](https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/JuliaBesties/BestieTemplate.jl/main/docs/src/assets/badge.json)](https://github.com/JuliaBesties/BestieTemplate.jl)
 
-This package provides a tool to simplfy the network that generates equivalent capacities.
+This package provides a tool to simplify networks by generating equivalent capacities.
 
 ## How to Cite
 
