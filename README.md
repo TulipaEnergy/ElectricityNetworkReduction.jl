@@ -11,6 +11,8 @@
 [![All Contributors](https://img.shields.io/github/all-contributors/TulipaEnergy/NetworkReduction.jl?labelColor=5e1ec7&color=c0ffee&style=flat-square)](#contributors)
 [![BestieTemplate](https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/JuliaBesties/BestieTemplate.jl/main/docs/src/assets/badge.json)](https://github.com/JuliaBesties/BestieTemplate.jl)
 
+This package provides a tool to simplfy the network that generates equivalent capacities.
+
 ## How to Cite
 
 If you use NetworkReduction.jl in your work, please cite using the reference given in [CITATION.cff](https://github.com/TulipaEnergy/NetworkReduction.jl/blob/main/CITATION.cff).
