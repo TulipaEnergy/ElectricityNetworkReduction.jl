@@ -11,7 +11,12 @@
 [![All Contributors](https://img.shields.io/github/all-contributors/TulipaEnergy/NetworkReduction.jl?labelColor=5e1ec7&color=c0ffee&style=flat-square)](#contributors)
 [![BestieTemplate](https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/JuliaBesties/BestieTemplate.jl/main/docs/src/assets/badge.json)](https://github.com/JuliaBesties/BestieTemplate.jl)
 
-This package provides a tool to simplify networks by generating equivalent capacities.
+NetworkReduction.jl is a package for simplifying detailed electrical networks into compact equivalents without losing the transfer characteristics. Starting from raw data, it selects representative nodes, performs Kron reduction, and optimizes synthetic line capacities.
+
+Key capabilities:
+
+- Automates the end-to-end workflow: data ingestion, Total Transfer Capacity (TTC)/Power Transfer Distribution Factors (PTDF) analysis, representative-node selection, Kron reduction, and optimization.
+- Validate results (`Equivalent_Capacities_QP.csv`, `TTC_Comparison_QP.csv`, etc.) for the Netherlands Case Study.
 
 ## How to Cite
 
