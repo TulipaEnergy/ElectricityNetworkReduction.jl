@@ -4,7 +4,6 @@ authors = ["Germán Morales-España <german.morales@tno.nl>", " Juan Giraldo Cha
 version = "0.1.0"
 
 [deps]
-CPLEX = "a076750e-1247-5638-91d2-ce28b192dca0"
 CSV = "336ed68f-0bac-5ca0-87d4-7b16caf5d00b"
 DataFrames = "a93c6f00-e57d-5684-b7b6-d8193f3e46c0"
 Gurobi = "2e9cd046-0924-5485-92f1-d5272153d98b"
@@ -29,3 +28,6 @@ MathOptInterface = "1"
 Statistics = "1"
 XLSX = "0.10"
 julia = "1.10"
+
+[extras]
+CPLEX = "504b1a1e-3f8b-11e9-14d9-0c6e6e8c3e3c"
