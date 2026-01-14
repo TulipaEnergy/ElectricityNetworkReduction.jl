@@ -59,7 +59,11 @@ end
 Convert line parameters to per-unit values based on system base power.
 If `in_pu` is true, assumes R, X, B are already in per-unit and only converts capacity.
 """
-function convert_line_to_pu!(lines_df::DataFrame, Sbase::Float64; in_pu::Bool=CONFIG.in_pu)
+function convert_line_to_pu!(
+    lines_df::DataFrame,
+    Sbase::Float64;
+    in_pu::Bool = CONFIG.in_pu,
+)
     if in_pu
         # Parameters already in per-unit, just rename columns
         lines_df[!, :R_pu] = lines_df.R
@@ -71,10 +75,12 @@ function convert_line_to_pu!(lines_df::DataFrame, Sbase::Float64; in_pu::Bool=CO
             [r / ((v^2) / Sbase) for (r, v) in zip(lines_df.R, lines_df.Voltage_level)]
         lines_df[!, :X_pu] =
             [x / ((v^2) / Sbase) for (x, v) in zip(lines_df.X, lines_df.Voltage_level)]
-        lines_df[!, :B_pu] =
-            [(b * 1e-6) * ((v^2) / Sbase) for (b, v) in zip(lines_df.B, lines_df.Voltage_level)]
+        lines_df[!, :B_pu] = [
+            (b * 1e-6) * ((v^2) / Sbase) for
+            (b, v) in zip(lines_df.B, lines_df.Voltage_level)
+        ]
     end
-    
+
     lines_df[!, :Capacity_pu] = lines_df.Capacity_MW ./ Sbase
     return lines_df
 end
@@ -90,9 +96,9 @@ function rename_buses(
     generators_df::DataFrame,
     lines_df::DataFrame,
     tie_lines_df::DataFrame,
-    Sbase::Float64=CONFIG.base,
-    in_pu::Bool=CONFIG.in_pu,  
-    bus_as_int::Bool=CONFIG.bus_names_as_int 
+    Sbase::Float64 = CONFIG.base,
+    in_pu::Bool = CONFIG.in_pu,
+    bus_as_int::Bool = CONFIG.bus_names_as_int,
 )
 
     # Define how to handle bus identifiers based on the config
@@ -104,11 +110,14 @@ function rename_buses(
         clean_bus_names = x -> uppercase.(strip.(string.(x)))
     end
 
-        # Original string handling (uppercase conversion)
-        transform!(nodes_df, :Bus => clean_bus_names => :Bus)
-        transform!(generators_df, :Bus => clean_bus_names => :Bus)
-        transform!(lines_df, [:From_node, :To_node] .=> (x -> uppercase.(strip.(string.(x)))))
-        transform!(tie_lines_df, [:From_node, :To_node] .=> (x -> uppercase.(strip.(string.(x)))))
+    # Original string handling (uppercase conversion)
+    transform!(nodes_df, :Bus => clean_bus_names => :Bus)
+    transform!(generators_df, :Bus => clean_bus_names => :Bus)
+    transform!(lines_df, [:From_node, :To_node] .=> (x -> uppercase.(strip.(string.(x)))))
+    transform!(
+        tie_lines_df,
+        [:From_node, :To_node] .=> (x -> uppercase.(strip.(string.(x)))),
+    )
 
     # For lines and tielines, we apply it to both From and To columns
     for df in [lines_df, tie_lines_df]
@@ -118,15 +127,15 @@ function rename_buses(
         end
     end
 
-    lines_df = convert_line_to_pu!(lines_df, Sbase, in_pu=in_pu)
-    tie_lines_df = convert_line_to_pu!(tie_lines_df, Sbase, in_pu=in_pu)
+    lines_df = convert_line_to_pu!(lines_df, Sbase, in_pu = in_pu)
+    tie_lines_df = convert_line_to_pu!(tie_lines_df, Sbase, in_pu = in_pu)
 
     bus_map = Dict{String,Int}()
     for (idx, bus_name) in enumerate(nodes_df.Bus)
         bus_map[bus_name] = idx
     end
 
-        # Helper function to consistently convert Area and Zone to String
+    # Helper function to consistently convert Area and Zone to String
     function convert_to_string(value)
         if ismissing(value)
             return ""
@@ -157,18 +166,18 @@ function rename_buses(
 
     for (idx, bus_row) in enumerate(eachrow(nodes_df))
         bus_name = bus_row.Bus
-    
+
         # Handle Area and Zone conversion
         area_value = bus_row.Area
         zone_value = bus_row.Zone
-        
+
         area_str = convert_to_string(area_value)
         zone_str = convert_to_string(zone_value)
 
         bus_node = filter(:Bus => x -> x == bus_name, nodes_df)
         isempty(bus_node) && error("Bus $bus_name not found in nodes DataFrame")
 
-           # Create a NamedTuple with all values
+        # Create a NamedTuple with all values
         new_row = (
             old_name = bus_name,
             new_id = idx,
@@ -184,9 +193,9 @@ function rename_buses(
             Zone = zone_str,
             is_representative = false,
         )
-        
+
         # Use push! with promote=true to handle type conversions automatically
-        push!(node_data, new_row, promote=true)
+        push!(node_data, new_row, promote = true)
     end
 
     for df in [lines_df, tie_lines_df]

@@ -10,7 +10,7 @@ function calculate_ptdfs_dc_power_flow(
     Ybus::SparseMatrixCSC{ComplexF64},
     from_bus::Int,
     to_bus::Int,
-    reference_slack::Int = 1  # Fixed reference slack for all calculations
+    reference_slack::Int = 1,  # Fixed reference slack for all calculations
 )
     N = size(Ybus, 1)
 
@@ -33,7 +33,7 @@ function calculate_ptdfs_dc_power_flow(
     # Create TWO injection vectors: one for from_bus, one for to_bus
     injection_from = zeros(length(non_slack_buses))
     injection_to = zeros(length(non_slack_buses))
-    
+
     # Map bus indices to reduced indices
     bus_to_reduced = Dict{Int,Int}()
     for (idx, bus) in enumerate(non_slack_buses)
@@ -44,7 +44,7 @@ function calculate_ptdfs_dc_power_flow(
     if from_bus != slack_bus && haskey(bus_to_reduced, from_bus)
         injection_from[bus_to_reduced[from_bus]] = 1.0
     end
-    
+
     # Set up injection for to_bus (+1, but we'll subtract)
     if to_bus != slack_bus && haskey(bus_to_reduced, to_bus)
         injection_to[bus_to_reduced[to_bus]] = 1.0
@@ -89,20 +89,20 @@ Returns Dict of PTDF vectors for each bus injection.
 """
 function calculate_single_injection_ptdfs(
     Ybus::SparseMatrixCSC{ComplexF64},
-    reference_bus::Int = 1
+    reference_bus::Int = 1,
 )
     N = size(Ybus, 1)
     B = -imag.(Ybus) |> sparse
-    
+
     # Non-reference buses
     non_ref_buses = collect(setdiff(1:N, reference_bus))
-    
+
     # Reduced B matrix
     B_reduced = B[non_ref_buses, non_ref_buses]
-    
+
     # Factorize once for efficiency
     B_reduced_fact = lu(B_reduced)
-    
+
     # Get all transmission lines
     lines = Vector{Tuple{Int,Int,Float64}}()
     rows, cols, vals = findnz(B)
@@ -113,41 +113,41 @@ function calculate_single_injection_ptdfs(
         end
     end
     num_lines = length(lines)
-    
+
     # Create mapping from bus to reduced index
     bus_to_reduced = Dict{Int,Int}()
     for (idx, bus) in enumerate(non_ref_buses)
         bus_to_reduced[bus] = idx
     end
-    
+
     # Pre-allocate results dictionary
     ptdf_single_injection = Dict{Int,Vector{Float64}}()
-    
+
     # PTDF for injection at reference bus is always 0
     ptdf_single_injection[reference_bus] = zeros(num_lines)
-    
+
     # Calculate for each non-reference bus
     for bus in non_ref_buses
         # Create unit injection vector at this bus
         e_k = zeros(length(non_ref_buses))
         e_k[bus_to_reduced[bus]] = 1.0
-        
+
         # Solve for voltage angles
         theta_reduced = B_reduced_fact \ e_k
-        
+
         # Reconstruct full theta vector
         theta_full = zeros(N)
         theta_full[non_ref_buses] .= theta_reduced
-        
+
         # Calculate PTDFs for all lines
         ptdf_vector = zeros(num_lines)
         for (line_idx, (i, j, b)) in enumerate(lines)
             ptdf_vector[line_idx] = b * (theta_full[i] - theta_full[j])
         end
-        
+
         ptdf_single_injection[bus] = ptdf_vector
     end
-    
+
     return ptdf_single_injection, lines
 end
 
@@ -176,7 +176,7 @@ function calculate_all_ptdfs_original(
     println("Calculating single-injection PTDF matrix (one-time computation)...")
     ptdf_single, lines_info = calculate_single_injection_ptdfs(Ybus)
     num_lines = length(lines_info)
-    
+
     # Create line index mapping for quick lookup
     line_index_map = Dict{Tuple{Int,Int},Int}()
     for (idx, (i, j, _)) in enumerate(lines_info)
@@ -195,7 +195,9 @@ function calculate_all_ptdfs_original(
     end
 
     total_transactions = length(transactions)
-    println("Processing PTDFs for $total_transactions canonical transactions using matrix method...")
+    println(
+        "Processing PTDFs for $total_transactions canonical transactions using matrix method...",
+    )
 
     # Pre-allocate results dataframe
     ptdf_results = DataFrame(
@@ -215,7 +217,7 @@ function calculate_all_ptdfs_original(
         ptdf_vector_a = ptdf_single[a]
         ptdf_vector_b = ptdf_single[b]
         transaction_ptdf = ptdf_vector_a - ptdf_vector_b
-        
+
         # Store results for all lines that exist in the network
         for (line_from, line_to) in keys(line_capacities)
             if haskey(line_index_map, (line_from, line_to))
@@ -232,9 +234,11 @@ function calculate_all_ptdfs_original(
             progress = idx / total_transactions * 100
             rate = idx / elapsed
             remaining_time = (total_transactions - idx) / rate
-            
+
             println("Progress: $(round(progress, digits=1))% ($idx/$total_transactions)")
-            println("  Elapsed: $(round(elapsed, digits=1))s, Rate: $(round(rate, digits=1)) trans/s")
+            println(
+                "  Elapsed: $(round(elapsed, digits=1))s, Rate: $(round(rate, digits=1)) trans/s",
+            )
             println("  Estimated remaining: $(round(remaining_time/60, digits=1)) minutes")
             last_report_time = current_time
         end
@@ -243,8 +247,10 @@ function calculate_all_ptdfs_original(
     elapsed_total = time() - start_time
     println("\nPTDF calculation completed!")
     println("Total time: $(round(elapsed_total, digits=1)) seconds")
-    println("Average rate: $(round(total_transactions/elapsed_total, digits=1)) transactions/second")
-    
+    println(
+        "Average rate: $(round(total_transactions/elapsed_total, digits=1)) transactions/second",
+    )
+
     return ptdf_results, line_capacities
 end
 
@@ -263,7 +269,7 @@ function calculate_ptdfs_reduced(
     # Calculate single injection PTDFs for reduced network
     println("Calculating single-injection PTDFs for reduced network...")
     ptdf_single_reduced, lines_info_reduced = calculate_single_injection_ptdfs(Y_kron)
-    
+
     # Generate canonical transactions between representative nodes
     reduced_transactions = Tuple{Int,Int}[]
     for a_r = 1:N_R
@@ -301,18 +307,18 @@ function calculate_ptdfs_reduced(
         ptdf_vector_a = ptdf_single_reduced[a_r]
         ptdf_vector_b = ptdf_single_reduced[b_r]
         transaction_ptdf = ptdf_vector_a - ptdf_vector_b
-        
+
         # Store results for all synthetic lines in reduced network
         for (line_idx, (i_r, j_r, _)) in enumerate(lines_info_reduced)
             if i_r != j_r
                 ptdf_value = transaction_ptdf[line_idx]
-                
+
                 # Map reduced indices back to original IDs
                 a_orig = rep_node_ids[a_r]
                 b_orig = rep_node_ids[b_r]
                 i_orig = rep_node_ids[i_r]
                 j_orig = rep_node_ids[j_r]
-                
+
                 push!(
                     ptdf_reduced_results,
                     (a_r, b_r, a_orig, b_orig, i_orig, j_orig, ptdf_value),
