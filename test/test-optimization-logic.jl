@@ -2,6 +2,21 @@ using NetworkReduction
 using Test
 using DataFrames
 
+@testset "Config Testing" begin
+    # 1. Test that the global constant exists
+    @test isdefined(NetworkReduction, :CONFIG)
+
+    # 2. Verify the type is correctly identified as 'Config'
+    @test NetworkReduction.CONFIG isa NetworkReduction.Config
+
+    # 3. Test a few default values to ensure the struct initialized correctly
+    @test NetworkReduction.CONFIG.optimization_type == "MIQP"
+    @test NetworkReduction.CONFIG.base == 100.0
+
+    # 4. Trigger the print function (this covers the loop in print_config)
+    @test_nowarn NetworkReduction.print_config()
+end
+
 @testset "Optimization Logic: LP, QP, and MIQP" begin
     # Make sure PTDF entries are not filtered out by epsilon
     NetworkReduction.CONFIG.ptdf_epsilon = 1e-9
