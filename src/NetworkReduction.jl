@@ -7,7 +7,6 @@ using LinearAlgebra
 using CSV
 using Statistics
 using JuMP
-using Ipopt
 using MathOptInterface
 using Revise
 using HiGHS
