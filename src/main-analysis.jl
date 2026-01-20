@@ -59,7 +59,10 @@ function main_full_analysis(input_data_dir::String, output_data_dir::String)
     println("Original Ybus matrix created: $n_buses×$n_buses")
 
     # --- EXPORT: Bus Map and Line Info  ---
-    export_bus_id_map(node_info, joinpath(output_data_dir, "Bus_ID_Map_$(CONFIG.suffix).csv"))
+    export_bus_id_map(
+        node_info,
+        joinpath(output_data_dir, "Bus_ID_Map_$(CONFIG.suffix).csv"),
+    )
     export_detailed_line_info(
         numbered_lines,
         numbered_tielines,
@@ -83,9 +86,12 @@ function main_full_analysis(input_data_dir::String, output_data_dir::String)
     ptdf_reduced_results = calculate_ptdfs_reduced(Y_kron, rep_node_ids)
 
     # --- 4. OPTIMIZATION FOR EQUIVALENT CAPACITIES ---
-      equivalent_capacities_df, ttc_equivalent = 
-        optimize_equivalent_capacities(ttc_results, ptdf_reduced_results, Type = CONFIG.optimization_type,
-        lambda = CONFIG.lambda)  # "MIQP" or "QP" or "LP"
+    equivalent_capacities_df, ttc_equivalent = optimize_equivalent_capacities(
+        ttc_results,
+        ptdf_reduced_results,
+        Type = CONFIG.optimization_type,
+        lambda = CONFIG.lambda,
+    )  # "MIQP" or "QP" or "LP"
 
     # Filter original TTCs to only include canonical RN-to-RN transactions for comparison
     rn_orig_ids = unique(
@@ -103,7 +109,7 @@ function main_full_analysis(input_data_dir::String, output_data_dir::String)
     )
 
     # --- 5. EQUIVALENT TTC CALCULATION & COMPARISON ---
-     if !isnothing(equivalent_capacities_df) && !isnothing(ttc_equivalent)
+    if !isnothing(equivalent_capacities_df) && !isnothing(ttc_equivalent)
         println("\n--- 5. TTC COMPARISON ---")
 
         # Join the two DataFrames for comparison
@@ -113,22 +119,23 @@ function main_full_analysis(input_data_dir::String, output_data_dir::String)
             on = [:transaction_from, :transaction_to],
             makeunique = true,
         )
-        
+
         # CONVERT PER-UNIT TO MW (100 MVA base)
 
         # Convert TTC values from pu to MW
         comparison_df[!, :TTC_Original_MW] = comparison_df.TTC_pu .* CONFIG.base
-        comparison_df[!, :TTC_Equivalent_MW] = comparison_df.TTC_Equivalent_pu .* CONFIG.base
+        comparison_df[!, :TTC_Equivalent_MW] =
+            comparison_df.TTC_Equivalent_pu .* CONFIG.base
 
         # Calculate Mismatch in MW
         comparison_df[!, :TTC_Mismatch_MW] =
-        comparison_df.TTC_Equivalent_MW .- comparison_df.TTC_Original_MW
-        
+            comparison_df.TTC_Equivalent_MW .- comparison_df.TTC_Original_MW
+
         # Calculate Percentage Error (still in %)
         comparison_df[!, :TTC_Error_Pct] =
-        (comparison_df.TTC_Mismatch_MW ./ comparison_df.TTC_Original_MW) .* 100
+            (comparison_df.TTC_Mismatch_MW ./ comparison_df.TTC_Original_MW) .* 100
         comparison_df[!, :TTC_Error_Pct] =
-        [isnan(x) ? 0.0 : x for x in comparison_df.TTC_Error_Pct]
+            [isnan(x) ? 0.0 : x for x in comparison_df.TTC_Error_Pct]
 
         # Merge with bus names for readability
         bus_name_map = Dict(row.new_id => row.old_name for row in eachrow(node_info))
@@ -160,7 +167,8 @@ function main_full_analysis(input_data_dir::String, output_data_dir::String)
         println(final_comparison)
 
         # Export comparison
-        output_path_comparison = joinpath(output_data_dir, "TTC_Comparison_$(CONFIG.suffix).csv")
+        output_path_comparison =
+            joinpath(output_data_dir, "TTC_Comparison_$(CONFIG.suffix).csv")
         CSV.write(output_path_comparison, final_comparison)
         println("\nTTC comparison exported to CSV: $output_path_comparison")
     else
@@ -172,52 +180,68 @@ function main_full_analysis(input_data_dir::String, output_data_dir::String)
     if !isnothing(equivalent_capacities_df)
         ttc_rn_original_mw = copy(ttc_rn_original)
         ttc_rn_original_mw[!, :TTC_MW] = ttc_rn_original_mw.TTC_pu .* CONFIG.base
-        ttc_rn_original_mw = ttc_rn_original_mw[!, 
-            [:transaction_from, :transaction_to, :TTC_MW, :limiting_line_from, :limiting_line_to]
+        ttc_rn_original_mw = ttc_rn_original_mw[
+            !,
+            [
+                :transaction_from,
+                :transaction_to,
+                :TTC_MW,
+                :limiting_line_from,
+                :limiting_line_to,
+            ],
         ]
-        
-        output_path_ttc = joinpath(output_data_dir, "TTC_Original_Network_$(CONFIG.suffix).csv")
+
+        output_path_ttc =
+            joinpath(output_data_dir, "TTC_Original_Network_$(CONFIG.suffix).csv")
         CSV.write(output_path_ttc, ttc_rn_original_mw)
         println("Original TTC exported in MW to CSV: $output_path_ttc")
     end
 
     # Add names for both the synthetic line and the transaction buses
-    ptdf_reduced_results[!, :line_from_name] = [bus_name_map[id] for id in ptdf_reduced_results.synth_line_from]
-    ptdf_reduced_results[!, :line_to_name] = [bus_name_map[id] for id in ptdf_reduced_results.synth_line_to]
-    ptdf_reduced_results[!, :txn_from_name] = [bus_name_map[id] for id in ptdf_reduced_results.transaction_from_orig]
-    ptdf_reduced_results[!, :txn_to_name] = [bus_name_map[id] for id in ptdf_reduced_results.transaction_to_orig]
+    ptdf_reduced_results[!, :line_from_name] =
+        [bus_name_map[id] for id in ptdf_reduced_results.synth_line_from]
+    ptdf_reduced_results[!, :line_to_name] =
+        [bus_name_map[id] for id in ptdf_reduced_results.synth_line_to]
+    ptdf_reduced_results[!, :txn_from_name] =
+        [bus_name_map[id] for id in ptdf_reduced_results.transaction_from_orig]
+    ptdf_reduced_results[!, :txn_to_name] =
+        [bus_name_map[id] for id in ptdf_reduced_results.transaction_to_orig]
 
-    output_path_ptdf_reduced = joinpath(output_data_dir, "PTDF_Reduced_Network_$(CONFIG.suffix).csv")
+    output_path_ptdf_reduced =
+        joinpath(output_data_dir, "PTDF_Reduced_Network_$(CONFIG.suffix).csv")
     CSV.write(output_path_ptdf_reduced, ptdf_reduced_results)
 
     # Export equivalent capacities in MW
     if !isnothing(equivalent_capacities_df)
-    eq_cap_mw = copy(equivalent_capacities_df)
-    
-    # Convert C_eq_pu to MW and rename columns
-    eq_cap_mw[!, :capacity_MW] = eq_cap_mw.C_eq_pu .* CONFIG.base
-    eq_cap_mw[!, :capacity_pu] = eq_cap_mw.C_eq_pu
-    
-    # Add original names
-    eq_cap_mw[!, :from_name] = [bus_name_map[id] for id in eq_cap_mw.synth_line_from]
-    eq_cap_mw[!, :to_name] = [bus_name_map[id] for id in eq_cap_mw.synth_line_to]
+        eq_cap_mw = copy(equivalent_capacities_df)
 
-    # Rename columns for consistency
-    rename!(eq_cap_mw, 
-        :synth_line_from => :from,
-        :synth_line_to => :to
-    )
-    
-    # Reorder columns: put MW first for clarity
-    # Include :from_name and :to_name in the selection list
-    eq_cap_mw = eq_cap_mw[!, [:from, :to, :from_name, :to_name, :capacity_MW, :capacity_pu]]
-    
-    output_path_eq_cap = joinpath(output_data_dir, "Equivalent_Capacities_$(CONFIG.suffix).csv")
-    CSV.write(output_path_eq_cap, eq_cap_mw)
-    println("Equivalent capacities exported in MW to CSV: $output_path_eq_cap")
-end
+        # Convert C_eq_pu to MW and rename columns
+        eq_cap_mw[!, :capacity_MW] = eq_cap_mw.C_eq_pu .* CONFIG.base
+        eq_cap_mw[!, :capacity_pu] = eq_cap_mw.C_eq_pu
+
+        # Add original names
+        eq_cap_mw[!, :from_name] = [bus_name_map[id] for id in eq_cap_mw.synth_line_from]
+        eq_cap_mw[!, :to_name] = [bus_name_map[id] for id in eq_cap_mw.synth_line_to]
+
+        # Rename columns for consistency
+        rename!(eq_cap_mw, :synth_line_from => :from, :synth_line_to => :to)
+
+        # Reorder columns: put MW first for clarity
+        # Include :from_name and :to_name in the selection list
+        eq_cap_mw =
+            eq_cap_mw[!, [:from, :to, :from_name, :to_name, :capacity_MW, :capacity_pu]]
+
+        output_path_eq_cap =
+            joinpath(output_data_dir, "Equivalent_Capacities_$(CONFIG.suffix).csv")
+        CSV.write(output_path_eq_cap, eq_cap_mw)
+        println("Equivalent capacities exported in MW to CSV: $output_path_eq_cap")
+    end
 
     println("\nALL DATA EXPORTED IN MW (100 MVA BASE).")
 
-    return ptdf_results, ttc_results, ptdf_reduced_results, equivalent_capacities_df, ttc_equivalent
+    return ptdf_results,
+    ttc_results,
+    ptdf_reduced_results,
+    equivalent_capacities_df,
+    ttc_equivalent
 end

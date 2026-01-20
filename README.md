@@ -11,7 +11,7 @@
 [![All Contributors](https://img.shields.io/github/all-contributors/TulipaEnergy/NetworkReduction.jl?labelColor=5e1ec7&color=c0ffee&style=flat-square)](#contributors)
 [![BestieTemplate](https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/JuliaBesties/BestieTemplate.jl/main/docs/src/assets/badge.json)](https://github.com/JuliaBesties/BestieTemplate.jl)
 
-**NetworkReduction.jl** is a Julia package for **power system network reduction** based on **PTDF-preserving Kron reduction** and **optimization-based equivalent capacity estimation**.  
+**NetworkReduction.jl** is a Julia package for **power system network reduction** based on **PTDF-preserving Kron reduction** and **optimization-based equivalent capacity estimation**.
 
 It is a package for simplifying detailed electrical networks into compact equivalents without losing the transfer characteristics. Starting from raw data, it selects representative nodes, performs Kron reduction, and optimizes synthetic line capacities.
 
@@ -26,7 +26,7 @@ It is a package for simplifying detailed electrical networks into compact equiva
 5. Select one **representative node** per zone (highest degree bus)
 6. Perform **Kron reduction** → obtain reduced Ybus between representative nodes
 7. Compute PTDFs in the reduced (equivalent) network
-8. **Optimize synthetic line capacities** so that TTC values in the reduced network match the original as closely as possible  
+8. **Optimize synthetic line capacities** so that TTC values in the reduced network match the original as closely as possible
    → using QP (default), MIQP or LP formulations
 9. Export results (including comparison tables and error statistics)
 
@@ -65,22 +65,23 @@ It is a package for simplifying detailed electrical networks into compact equiva
 │   └── test-case-studies.jl     # Test cases
 └── README.md                    # This file
 ```
+
 ---
 
 ## Installation
 
 Install the package directly from GitHub:
 
-
-using Pkg  
-Pkg.add(url = "https://github.com/TulipaEnergy/NetworkReduction.jl.git")
+using Pkg
+Pkg.add(url = "<https://github.com/TulipaEnergy/NetworkReduction.jl.git>")
 
 To ensure all necessary dependencies are installed in your environment:
 
-using Pkg  
+using Pkg
 Pkg.instantiate()
 
 Solvers
+
 - The model uses JuMP for optimization.
 
 - Ipopt: Used by default for QP and LP problems.
@@ -93,9 +94,11 @@ using NetworkReduction
 ---
 
 ## Configuration
+
 The package behavior is controlled via a central Config struct. You can modify these values globally using NetworkReduction.CONFIG:
 
 ### Available configuration options
+
 ```text
 CONFIG.input_filename = "case118.xlsx"       # Input Excel file name
 CONFIG.case_study = "case118"                # Case study identifier
@@ -107,6 +110,7 @@ CONFIG.lambda = 1e-6                         # Regularization parameter
 CONFIG.ptdf_epsilon = 0.001                  # PTDF zero threshold
 CONFIG.suffix = "QP"                         # Output file suffix
 ```
+
 ---
 
 ## Quick Start – Full Analysis
@@ -114,6 +118,7 @@ CONFIG.suffix = "QP"                         # Output file suffix
 using NetworkReduction
 
 ### Customize configuration
+
 ```text
 CONFIG.input_filename    = "case118.xlsx"
 CONFIG.case_study        = "case118"
@@ -128,6 +133,7 @@ output_dir = joinpath(@__DIR__, "results", CONFIG.case_study)
 ```
 
 #### Run everything
+
 ptdf_original,
 ttc_original,
 ptdf_reduced,
@@ -142,7 +148,7 @@ After execution you should find (in output_dir):
 - TTC_Original_Network_QP.csv
 - PTDF_Reduced_Network_QP.csv
 - Equivalent_Capacities_QP.csv
-- TTC_Comparison_QP.csv         
+- TTC_Comparison_QP.csv
 
 ## Limitations & Notes
 

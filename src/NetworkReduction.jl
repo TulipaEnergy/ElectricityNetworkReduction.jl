@@ -7,10 +7,9 @@ using LinearAlgebra
 using CSV
 using Statistics
 using JuMP
-using Ipopt
 using MathOptInterface
 using Revise
-using CPLEX
+using HiGHS
 
 export load_excel_data,
     clean_line_data,
