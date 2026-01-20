@@ -164,7 +164,7 @@ If you use NetworkReduction.jl in your work, please cite using the reference giv
 
 ## Contributing
 
-If you want to make contributions of any kind, please first that a look into our [contributing guide directly on GitHub](docs/src/04-contributing.md) or the [contributing page on the website](https://TulipaEnergy.github.io/NetworkReduction.jl/dev/04-contributing/)
+If you want to make contributions of any kind, please first that a look into our [contributing guide directly on GitHub] or the [contributing page on the website]
 
 ---
 
