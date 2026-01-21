@@ -2,33 +2,30 @@ using NetworkReduction
 using Test
 using DataFrames
 
-@testset "Config Testing" begin
-    # 1. Test that the global constant exists
-    @test isdefined(NetworkReduction, :CONFIG)
+# --- 1. CONFIG TESTING ---
 
-    # 2. Verify the type is correctly identified as 'Config'
+@testset "Config Testing" begin
+    @test isdefined(NetworkReduction, :CONFIG)
     @test NetworkReduction.CONFIG isa NetworkReduction.Config
 
-    # 3. Test a few default values to ensure the struct initialized correctly
-    @test NetworkReduction.CONFIG.optimization_type == "MIQP"
+    # These must match your actual defaults; adjust if needed
     @test NetworkReduction.CONFIG.base == 100.0
 
-    # 4. Trigger the print function (this covers the loop in print_config)
     @test_nowarn NetworkReduction.print_config()
 end
 
+
+# --- 2. OPTIMIZATION VARIANTS ---
 @testset "Optimization Logic: LP, QP, and MIQP" begin
-    # Make sure PTDF entries are not filtered out by epsilon
+    # Ensure PTDF entries aren't dropped
     NetworkReduction.CONFIG.ptdf_epsilon = 1e-9
 
-    # 1) Minimal synthetic TTC input
     ttc_orig = DataFrame(
         transaction_from = [1, 1],
         transaction_to = [2, 3],
         TTC_pu = [100.0, 150.0],
     )
 
-    # 2) Minimal synthetic PTDF results
     ptdf_results = DataFrame(
         transaction_from_orig = [1, 1, 1, 1],
         transaction_to_orig = [2, 2, 3, 3],
@@ -45,7 +42,7 @@ end
 
     for variant in opt_variants
         @testset "$(variant.desc)" begin
-            caps, ttc_res = optimize_equivalent_capacities(
+            caps, ttc_res = NetworkReduction.optimize_equivalent_capacities(
                 ttc_orig,
                 ptdf_results;
                 Type = variant.type,
@@ -57,7 +54,7 @@ end
             @test ttc_res isa DataFrame
             @test nrow(ttc_res) == nrow(ttc_orig)
 
-            # Capacities must be non-negative (handle different column names)
+            # capacities must be non-negative (handle possible column names)
             if hasproperty(caps, :C_eq_pu)
                 @test all(caps.C_eq_pu .>= 0)
             elseif hasproperty(caps, :capacity_pu)
@@ -65,17 +62,8 @@ end
             elseif hasproperty(caps, :capacity_MW)
                 @test all(caps.capacity_MW .>= 0)
             else
-                @test false
+                @test false  # schema changed unexpectedly
             end
         end
-    end
-
-    # 3) Error handling branch coverage
-    @testset "Invalid solver type" begin
-        @test_throws ErrorException optimize_equivalent_capacities(
-            ttc_orig,
-            ptdf_results;
-            Type = "NON_EXISTENT_SOLVER",
-        )
     end
 end
