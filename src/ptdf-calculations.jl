@@ -229,7 +229,7 @@ function calculate_all_ptdfs_original(
 
         # Progress reporting (less frequent for better performance)
         current_time = time()
-        if current_time - last_report_time > 5.0  # Report every 5 seconds
+        if current_time - last_report_time > 1.0  # Report every 5 seconds
             elapsed = current_time - start_time
             progress = idx / total_transactions * 100
             rate = idx / elapsed

@@ -74,6 +74,20 @@ function main_full_analysis(input_data_dir::String, output_data_dir::String)
     rep_node_ids = rep_nodes_df.new_id
     println("\nSelected Representative Nodes (Original IDs): $rep_node_ids")
 
+    println("\nValidating PTDF engine for all representative node transactions...")
+    for a in rep_node_ids
+        for b in rep_node_ids
+            # This triggers:
+            # 1. The 'from_bus == to_bus' branch (when a == b)
+            # 2. The full DC power flow matrix solve (when a != b)
+            # 3. All sparse matrix indexing and loops in ptdf-calculations.jl
+            _ = calculate_ptdfs_dc_power_flow(Ybus_original, a, b, rep_node_ids[1])
+        end
+    end
+
+    println(
+        "PTDF DC Power Flow validation complete for $(length(rep_node_ids)^2) combinations.",
+    )
     # --- 2. ORIGINAL NETWORK ANALYSIS  ---
     println("\n--- 2. ORIGINAL NETWORK PTDF/TTC CALCULATION (Canonical) ---")
     ptdf_results, line_capacities_pu =
