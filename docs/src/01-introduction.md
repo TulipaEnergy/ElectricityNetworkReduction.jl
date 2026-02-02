@@ -1,8 +1,8 @@
-# NetworkReduction.jl
+# ElectricityNetworkReduction.jl
 
 ## Overview
 
-**NetworkReduction.jl** is a high-performance Julia package for physics-preserving reduction and equivalencing of large-scale electrical transmission networks.
+**ElectricityNetworkReduction.jl** is a high-performance Julia package for physics-preserving reduction and equivalencing of large-scale electrical transmission networks.
 It provides a mathematically rigorous and computationally efficient workflow for reducing full transmission system models into compact equivalent networks while preserving their power transfer characteristics, congestion behaviour, and operational limits.
 
 The package is specifically designed for power system studies where full network models are too large or computationally expensive to embed inside:
@@ -19,7 +19,7 @@ It enables users to replace large meshed networks with accurate reduced equivale
 
 ## Modelling Scope
 
-NetworkReduction.jl implements a **DC power flow based network equivalencing framework** built on the following modelling principles:
+ElectricityNetworkReduction.jl implements a **DC power flow based network equivalencing framework** built on the following modelling principles:
 
 - Linearized DC power flow physics
 - Exact Y-bus matrix formulation
@@ -55,7 +55,7 @@ Embedding such models inside optimisation problems leads to:
 - Poor numerical conditioning
 - Limited scalability
 
-NetworkReduction.jl solves this by:
+ElectricityNetworkReduction.jl solves this by:
 
 - Reducing thousands of buses into tens of representative nodes
 - Preserving inter-zonal power transfer limits
@@ -133,4 +133,4 @@ MIT License
 
 If you use this package in academic work, please cite:
 
-> NetworkReduction.jl – A Julia Toolkit for Power System Network Reduction and Equivalencing
+> ElectricityNetworkReduction.jl – A Julia Toolkit for Power System Network Reduction and Equivalencing

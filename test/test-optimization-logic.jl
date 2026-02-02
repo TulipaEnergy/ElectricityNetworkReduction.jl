@@ -1,24 +1,24 @@
-using NetworkReduction
+using ElectricityNetworkReduction
 using Test
 using DataFrames
 
 # --- 1. CONFIG TESTING ---
 
 @testset "Config Testing" begin
-    @test isdefined(NetworkReduction, :CONFIG)
-    @test NetworkReduction.CONFIG isa NetworkReduction.Config
+    @test isdefined(ElectricityNetworkReduction, :CONFIG)
+    @test ElectricityNetworkReduction.CONFIG isa ElectricityNetworkReduction.Config
 
     # These must match your actual defaults; adjust if needed
-    @test NetworkReduction.CONFIG.base == 100.0
+    @test ElectricityNetworkReduction.CONFIG.base == 100.0
 
-    @test_nowarn NetworkReduction.print_config()
+    @test_nowarn ElectricityNetworkReduction.print_config()
 end
 
 
 # --- 2. OPTIMIZATION VARIANTS ---
 @testset "Optimization Logic: LP, QP, and MIQP" begin
     # Ensure PTDF entries aren't dropped
-    NetworkReduction.CONFIG.ptdf_epsilon = 1e-9
+    ElectricityNetworkReduction.CONFIG.ptdf_epsilon = 1e-9
 
     ttc_orig = DataFrame(
         transaction_from = [1, 1],
@@ -42,7 +42,7 @@ end
 
     for variant in opt_variants
         @testset "$(variant.desc)" begin
-            caps, ttc_res = NetworkReduction.optimize_equivalent_capacities(
+            caps, ttc_res = ElectricityNetworkReduction.optimize_equivalent_capacities(
                 ttc_orig,
                 ptdf_results;
                 Type = variant.type,

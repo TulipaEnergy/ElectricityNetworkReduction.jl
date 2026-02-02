@@ -5,7 +5,7 @@
 [deps]
 Documenter = "e30172f5-a6a5-5a46-863b-614d45cd2de4"
 LiveServer = "16fef848-5104-11e9-1b77-fb7a48bbb589"
-NetworkReduction = "8d6c9889-004b-5ffc-a588-babdd84958c6"
+ElectricityNetworkReduction = "8d6c9889-004b-5ffc-a588-babdd84958c6"
 
 [compat]
 Documenter = "1"

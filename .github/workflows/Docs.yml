@@ -45,9 +45,9 @@ jobs:
         run: |
           julia --project=docs -e '
             using Documenter: DocMeta, doctest
-            using NetworkReduction
-            DocMeta.setdocmeta!(NetworkReduction, :DocTestSetup, :(using NetworkReduction); recursive=true)
-            doctest(NetworkReduction)'
+            using ElectricityNetworkReduction
+            DocMeta.setdocmeta!(ElectricityNetworkReduction, :DocTestSetup, :(using ElectricityNetworkReduction); recursive=true)
+            doctest(ElectricityNetworkReduction)'
       - name: Generate and deploy documentation
         run: julia --project=docs docs/make.jl
         env:

@@ -1,4 +1,4 @@
-using NetworkReduction
+using ElectricityNetworkReduction
 using Test
 using DataFrames
 using CSV

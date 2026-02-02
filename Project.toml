@@ -1,4 +1,4 @@
-name = "NetworkReduction"
+name = "ElectricityNetworkReduction"
 uuid = "8d6c9889-004b-5ffc-a588-babdd84958c6"
 version = "0.1.0"
 authors = ["Germán Morales-España <german.morales@tno.nl>", " Juan Giraldo Chavarriaga <juan.giraldo@tno.nl>", " Muhammad Numan <muhammad.numan@ucd.ie>", " Ni Wang <ni.wang@tno.nl>"]

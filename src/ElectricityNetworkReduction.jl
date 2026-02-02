@@ -1,4 +1,4 @@
-module NetworkReduction
+module ElectricityNetworkReduction
 
 using XLSX
 using DataFrames

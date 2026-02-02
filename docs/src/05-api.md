@@ -1,6 +1,6 @@
 # API Reference
 
 ```@autodocs
-Modules = [NetworkReduction]
+Modules = [ElectricityNetworkReduction]
 Order   = [:function, :type]
 ```

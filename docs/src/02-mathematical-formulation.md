@@ -1,6 +1,6 @@
 # Mathematical Formulation
 
-This document presents the mathematical foundations of the **NetworkReduction.jl** model.
+This document presents the mathematical foundations of the **ElectricityNetworkReduction.jl** model.
 The objective of the model is to construct a reduced electrical network that preserves the
 power transfer characteristics of the original system while significantly reducing its size.
 
