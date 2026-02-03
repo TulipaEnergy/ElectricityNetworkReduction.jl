@@ -11,7 +11,7 @@ Modify the default values below to run different case studies.
 Base.@kwdef mutable struct Config
     # Data input/output
     input_filename::String = "NL_HV_Network.xlsx"   # Input Excel file name
-    case_study::String = "NL_Case"                  # Case study identifier
+    case_study::String = "case_NL"                  # Case study identifier
 
     # Flags that change per case study
     bus_names_as_int::Bool = false      # true if bus names are integers
