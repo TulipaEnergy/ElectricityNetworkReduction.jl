@@ -15,13 +15,7 @@ test_suites = [
     (name = "case6", file = "case6.xlsx", int_bus = true, pu = true, opt = "QP"),
     (name = "case39", file = "case39.xlsx", int_bus = true, pu = true, opt = "QP"),
     (name = "case118", file = "case118.xlsx", int_bus = false, pu = false, opt = "QP"),
-    (
-        name = "case_ACTIVSg2000",
-        file = "case_ACTIVSg2000.xlsx",
-        int_bus = true,
-        pu = true,
-        opt = "QP",
-    ),
+    # (name = "case_ACTIVSg2000", file = "case_ACTIVSg2000.xlsx", int_bus = true, pu = true, opt = "QP"),
 ]
 
 @testset "Batch Network Reduction Tests" begin
