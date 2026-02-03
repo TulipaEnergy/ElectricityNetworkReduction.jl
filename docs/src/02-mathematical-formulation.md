@@ -68,7 +68,7 @@ $$Y_{reduced} = Y_{RR} - Y_{RE} Y_{EE}^{-1} Y_{ER}$$
 
 The package identifies synthetic capacities $C_l^{eq}$ for the reduced network to match the original $TTC^{orig}$. Based on `optimization.jl`, three methods are available:
 
-### 5.1 Quadratic Programming (QP)
+## 5.1 Quadratic Programming (QP)
 
 **Objective:** Minimize the squared error between original and equivalent TTC, with a regularization term to keep capacities realistic.
 
@@ -81,7 +81,7 @@ $$\min \sum_{t \in \mathcal{T}} (TTC_t^{eq} - TTC_t^{orig})^2 + \lambda \sum_{l 
 2. **Non-negativity:**
    $$C_l^{eq} \ge 0, \quad TTC_t^{eq} \ge 0$$
 
-### 5.2 Linear Programming (LP)
+## 5.2 Linear Programming (LP)
 
 **Objective:** Maximize the total transfer capacity of the reduced network while ensuring it never exceeds the original limits.
 
@@ -96,7 +96,7 @@ $$\max \sum_{t \in \mathcal{T}} TTC_t^{eq}$$
 3. **Capacity Ceiling:** (Optional scaling)
    $$C_l^{eq} \le \text{max\_factor} \cdot \max(TTC^{orig})$$
 
-## 7.2 MIQP (Original Mixed-Integer Quadratic Programming)
+## 5.3 MIQP (Original Mixed-Integer Quadratic Programming)
 
 This formulation is used when we want to identify which synthetic line is **binding** (limiting) for each transaction.
 
@@ -121,9 +121,7 @@ $$\min \sum_{t\in\mathcal{T}} (TTC_t^{eq}-TTC_t^{orig})^2 + \lambda\sum_{l\in\ma
 3. **Big-M binding constraint (enforcing equality on chosen line):**
    $$\frac{C_l^{eq}}{|PTDF_{t,l}|} - TTC_t^{eq} \le M(1-z_{t,l}) \qquad \forall t,l$$
 
----
-
-## 7.3 Linearized MIQP → MILP (HiGHS-Compatible)
+## 5.4 Linearized MIQP → MILP (HiGHS-Compatible)
 
 To make the MIQP practical for large networks, the implementation uses a **linearized MILP** solved by **HiGHS**.
 

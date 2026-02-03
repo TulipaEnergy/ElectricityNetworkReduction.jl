@@ -75,24 +75,12 @@ function main_full_analysis(input_data_dir::String, output_data_dir::String)
     println("\nSelected Representative Nodes (Original IDs): $rep_node_ids")
 
     println("\nValidating PTDF engine for all representative node transactions...")
-    for a in rep_node_ids
-        for b in rep_node_ids
-            # This triggers:
-            # 1. The 'from_bus == to_bus' branch (when a == b)
-            # 2. The full DC power flow matrix solve (when a != b)
-            # 3. All sparse matrix indexing and loops in ptdf-calculations.jl
-            _ = calculate_ptdfs_dc_power_flow(Ybus_original, a, b, rep_node_ids[1])
-        end
-    end
 
-    println(
-        "PTDF DC Power Flow validation complete for $(length(rep_node_ids)^2) combinations.",
-    )
     # --- 2. ORIGINAL NETWORK ANALYSIS  ---
-    println("\n--- 2. ORIGINAL NETWORK PTDF/TTC CALCULATION (Canonical) ---")
-    ptdf_results, line_capacities_pu =
-        calculate_all_ptdfs_original(Ybus_original, numbered_lines, numbered_tielines)
-    ttc_results = calculate_ttc_from_ptdfs(ptdf_results, line_capacities_pu)
+    # New memory-efficient call:
+    ttc_results, line_capacities_pu =
+        calculate_all_ttc_results(Ybus_original, numbered_lines, numbered_tielines)
+    # NOTE: ptdf_results is no longer stored for the full network.
 
     # --- 3. KRON REDUCTION & REDUCED PTDF CALCULATION ---
     println("\n--- 3. KRON REDUCTION & REDUCED PTDF CALCULATION (Canonical) ---")
@@ -165,12 +153,12 @@ function main_full_analysis(input_data_dir::String, output_data_dir::String)
             [
                 :From_Name,
                 :To_Name,
-                :TTC_Original_MW,        # In MW
-                :TTC_Equivalent_MW,      # In MW
-                :TTC_Mismatch_MW,        # In MW
-                :TTC_Error_Pct,          # In %
-                :limiting_line_from,     # Limiting line in original network
-                :limiting_synth_line_from, # Limiting line in equivalent network
+                :TTC_Original_MW,           # In MW
+                :TTC_Equivalent_MW,         # In MW
+                :TTC_Mismatch_MW,           # In MW
+                :TTC_Error_Pct,             # In %
+                :limiting_line_from,        # Limiting line in original network
+                :limiting_synth_line_from,  # Limiting line in equivalent network
             ],
         ]
 
@@ -253,9 +241,6 @@ function main_full_analysis(input_data_dir::String, output_data_dir::String)
 
     println("\nALL DATA EXPORTED IN MW (100 MVA BASE).")
 
-    return ptdf_results,
-    ttc_results,
-    ptdf_reduced_results,
-    equivalent_capacities_df,
-    ttc_equivalent
+    return
+    ttc_results, ptdf_reduced_results, equivalent_capacities_df, ttc_equivalent
 end
