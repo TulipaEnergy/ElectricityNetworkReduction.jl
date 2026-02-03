@@ -306,7 +306,7 @@ function _solve_miqp_model(
     C_ub = max_C_factor * max_ttc * max_ptdf
 
     # ── Model ───────────────────────────────────────────────────────────────
-    model = Model(Ipopt.Optimizer)
+    model = Model(HiGHS.Optimizer)
     set_silent(model)
 
 
