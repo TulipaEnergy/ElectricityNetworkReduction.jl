@@ -6,7 +6,7 @@ using DataFrames
 # 1. List of case studies to test
 test_suites = [
     (
-        name = "NL_Case",
+        name = "case_NL",
         file = "NL_HV_Network.xlsx",
         int_bus = false,
         pu = false,
