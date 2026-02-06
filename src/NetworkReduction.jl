@@ -10,6 +10,7 @@ using JuMP
 using MathOptInterface
 using Revise
 using HiGHS
+using Ipopt
 
 export load_excel_data,
     clean_line_data,
@@ -30,7 +31,8 @@ export load_excel_data,
     export_detailed_line_info,
     main_full_analysis,
     config,
-    CONFIG
+    CONFIG,
+    reset_config!
 
 #Configuration fie
 include("config.jl")

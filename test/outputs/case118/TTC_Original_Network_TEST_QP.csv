@@ -1,0 +1,4 @@
+transaction_from,transaction_to,TTC_MW,limiting_line_from,limiting_line_to
+12,37,501.4901037914094,11,12
+12,49,112.8169481788267,48,49
+37,49,110.60492998656302,48,49

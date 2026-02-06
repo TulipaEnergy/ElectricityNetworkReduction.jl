@@ -9,3 +9,5 @@ Use the navigation on the left to read:
 - Introduction
 - Mathematical formulation
 - Model usage
+- Contributing
+- API

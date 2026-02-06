@@ -64,7 +64,7 @@ function optimize_equivalent_capacities(
     if Type == "MIQP"
         println("Note: MIQP converted to MILP (linearized)")
     end
-    println("Selected solver: HiGHS")
+    println("Selected solver: Ipopt")
 
     # ------------------------------------------------------------
     # 1. DATA PREPARATION (COMMON FOR ALL MODELS)
@@ -227,16 +227,11 @@ function _solve_qp_model(
 )
     println("Setting up QP model...")
 
-    # Use HiGHS for QP
-    model = Model(HiGHS.Optimizer)
+    # Use Ipopt for QP
+    model = Model(Ipopt.Optimizer)
 
-    # HiGHS-specific settings
-    set_silent(model)  # Suppress HiGHS output
-
-    # Optional: Set HiGHS parameters
-    #set_optimizer_attribute(model, "time_limit", 300.0)  # Time limit in seconds
-    #set_optimizer_attribute(model, "presolve", "on")     # Enable presolve
-    set_optimizer_attribute(model, "output_flag", false) # Suppress output
+    # Ipopt-specific settings
+    set_silent(model)  # Suppress output
 
     # Variables
     @variable(model, C_eq[l in L] >= 0)           # Equivalent capacities
@@ -284,7 +279,7 @@ end
 # MIQP MODEL IMPLEMENTATION
 # ------------------------------------------------------------
 """
-Linearized MILP formulation using HiGHS that enforces **exactly one binding line** per transaction.
+Linearized MILP formulation using Ipopt that enforces **exactly one binding line** per transaction.
 Objective: minimize sum of absolute TTC errors (L1 norm).
 
 """
@@ -300,7 +295,7 @@ function _solve_miqp_model(
     max_C_factor::Float64 = 3.0,
 )
     println(
-        "Setting up linearized MILP model (HiGHS) — exactly one binding line per transaction",
+        "Setting up linearized MILP model (Ipopt) — exactly one binding line per transaction",
     )
 
     # ── Safeguards & big-M computation ──────────────────────────────────────
@@ -313,7 +308,7 @@ function _solve_miqp_model(
     # ── Model ───────────────────────────────────────────────────────────────
     model = Model(HiGHS.Optimizer)
     set_silent(model)
-    set_optimizer_attribute(model, "output_flag", false)
+
 
     # ── Variables ───────────────────────────────────────────────────────────
     @variable(model, 0 ≤ C_eq[l in L] ≤ C_ub)
@@ -437,13 +432,9 @@ function _solve_lp_model(
 )
     println("Setting up LP model...")
 
-    # Use HiGHS for LP
-    model = Model(HiGHS.Optimizer)
+    # Use Ipopt for LP
+    model = Model(Ipopt.Optimizer)
     set_silent(model)
-
-    # Optional HiGHS settings for LP
-    #set_optimizer_attribute(model, "time_limit", 300.0)
-    set_optimizer_attribute(model, "presolve", "on")
 
     # Variables
     @variable(model, C_eq[l in L] >= 0)           # Equivalent capacities
