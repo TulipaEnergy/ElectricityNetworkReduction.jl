@@ -1,4 +1,4 @@
-module NetworkReduction
+module ElectricityNetworkReduction
 
 using XLSX
 using DataFrames
@@ -8,7 +8,6 @@ using CSV
 using Statistics
 using JuMP
 using MathOptInterface
-using Revise
 using HiGHS
 using Ipopt
 

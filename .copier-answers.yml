@@ -5,7 +5,7 @@ JuliaMinVersion: '1.10'
 License: Apache-2.0
 LicenseCopyrightHolders: Germán Morales-España, Juan Giraldo Chavarriaga, Muhammad
     Numan, Ni Wang
-PackageName: NetworkReduction
+PackageName: ElectricityNetworkReduction
 PackageOwner: TulipaEnergy
 PackageUUID: 8d6c9889-004b-5ffc-a588-babdd84958c6
 StrategyConfirmIncluded: false

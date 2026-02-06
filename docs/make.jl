@@ -1,10 +1,10 @@
-using NetworkReduction
+using ElectricityNetworkReduction
 using Documenter
 
 DocMeta.setdocmeta!(
-    NetworkReduction,
+    ElectricityNetworkReduction,
     :DocTestSetup,
-    :(using NetworkReduction);
+    :(using ElectricityNetworkReduction);
     recursive = true,
 )
 
@@ -15,14 +15,14 @@ const numbered_pages = [
 ]
 
 makedocs(;
-    modules = [NetworkReduction],
+    modules = [ElectricityNetworkReduction],
     authors = "Germán Morales-España <german.morales@tno.nl>, Juan Giraldo Chavarriaga <juan.giraldo@tno.nl>, Muhammad Numan <muhammad.numan@ucd.ie>, Ni Wang <ni.wang@tno.nl>",
-    repo = "https://github.com/TulipaEnergy/NetworkReduction.jl/blob/{commit}{path}#{line}",
-    sitename = "NetworkReduction.jl",
+    repo = "https://github.com/TulipaEnergy/ElectricityNetworkReduction.jl/blob/{commit}{path}#{line}",
+    sitename = "ElectricityNetworkReduction.jl",
     format = Documenter.HTML(;
-        canonical = "https://TulipaEnergy.github.io/NetworkReduction.jl",
+        canonical = "https://TulipaEnergy.github.io/ElectricityNetworkReduction.jl",
     ),
     pages = ["index.md"; numbered_pages],
 )
 
-deploydocs(; repo = "github.com/TulipaEnergy/NetworkReduction.jl")
+deploydocs(; repo = "github.com/TulipaEnergy/ElectricityNetworkReduction.jl")

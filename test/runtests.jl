@@ -1,10 +1,7 @@
-using NetworkReduction
+using ElectricityNetworkReduction
 using Test
 using DataFrames
 using CSV
-
-
-include("test-optimization-logic.jl")
 
 # Folders names
 const INPUT_FOLDER = joinpath(@__DIR__, "inputs")

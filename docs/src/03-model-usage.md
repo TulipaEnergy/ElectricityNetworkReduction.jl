@@ -4,7 +4,7 @@
 
 ```julia
 using Pkg
-Pkg.add(url="https://github.com/TulipaEnergy/NetworkReduction.jl.git")
+Pkg.add(url="https://github.com/TulipaEnergy/ElectricityNetworkReduction.jl.git")
 Pkg.instantiate()
 ```
 
@@ -12,8 +12,8 @@ Pkg.instantiate()
 
 ```julia
 # Clone the repository
-git clone https://github.com/TulipaEnergy/NetworkReduction.jl.git
-cd NetworkReduction.jl
+git clone https://github.com/TulipaEnergy/ElectricityNetworkReduction.jl.git
+cd ElectricityNetworkReduction.jl
 
 # Start Julia and activate project
 julia --project=@.
@@ -26,7 +26,7 @@ Pkg.instantiate()
 ## Basic usage
 
 ```julia
-using NetworkReduction
+using ElectricityNetworkReduction
 
 # Define input/output directories
 input_dir = "test/inputs/NL_case"    # Contains your Excel network data
