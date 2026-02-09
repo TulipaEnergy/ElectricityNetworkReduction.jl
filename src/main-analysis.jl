@@ -142,17 +142,17 @@ function main_full_analysis(input_data_dir::String, output_data_dir::String)
         # Merge with bus names for readability
         bus_name_map = Dict(row.new_id => row.old_name for row in eachrow(node_info))
 
-        comparison_df[!, :From_Name] =
+        comparison_df[!, :From_node] =
             [bus_name_map[id] for id in comparison_df.transaction_from]
-        comparison_df[!, :To_Name] =
+        comparison_df[!, :To_node] =
             [bus_name_map[id] for id in comparison_df.transaction_to]
 
         # Select and reorder columns for final output (MW columns)
         final_comparison = comparison_df[
             !,
             [
-                :From_Name,
-                :To_Name,
+                :From_node,
+                :To_node,
                 :TTC_Original_MW,           # In MW
                 :TTC_Equivalent_MW,         # In MW
                 :TTC_Mismatch_MW,           # In MW
@@ -222,16 +222,16 @@ function main_full_analysis(input_data_dir::String, output_data_dir::String)
         eq_cap_mw[!, :capacity_pu] = eq_cap_mw.C_eq_pu
 
         # Add original names
-        eq_cap_mw[!, :from_name] = [bus_name_map[id] for id in eq_cap_mw.synth_line_from]
-        eq_cap_mw[!, :to_name] = [bus_name_map[id] for id in eq_cap_mw.synth_line_to]
+        eq_cap_mw[!, :from_node] = [bus_name_map[id] for id in eq_cap_mw.synth_line_from]
+        eq_cap_mw[!, :to_node] = [bus_name_map[id] for id in eq_cap_mw.synth_line_to]
 
         # Rename columns for consistency
         rename!(eq_cap_mw, :synth_line_from => :from, :synth_line_to => :to)
 
         # Reorder columns: put MW first for clarity
-        # Include :from_name and :to_name in the selection list
+        # Include :from_node and :to_node in the selection list
         eq_cap_mw =
-            eq_cap_mw[!, [:from, :to, :from_name, :to_name, :capacity_MW, :capacity_pu]]
+            eq_cap_mw[!, [:from, :to, :from_node, :to_node, :capacity_MW, :capacity_pu]]
 
         output_path_eq_cap =
             joinpath(output_data_dir, "Equivalent_Capacities_$(CONFIG.suffix).csv")
