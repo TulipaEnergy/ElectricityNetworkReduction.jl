@@ -19,7 +19,7 @@ It is a package for simplifying detailed electrical networks into compact equiva
 
 ## How to Cite
 
-If you use ElectricityNetworkReduction.jl in your work, please cite using the reference given in [CITATION.cff](https://github.com/TulipaEnergy/NetworkReduction.jl/blob/main/CITATION.cff).
+If you use ElectricityNetworkReduction.jl in your work, please cite using the reference given in [CITATION.cff](https://github.com/TulipaEnergy/ElectricityNetworkReduction.jl/blob/main/CITATION.cff).
 
 ## Installation
 
