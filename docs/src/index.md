@@ -1,13 +1,12 @@
-# ElectricityNetworkReduction.jl
 
-ElectricityNetworkReduction.jl is a Julia toolkit for network equivalencing and reduction (Kron-based reduction, PTDF/TTC workflows, and capacity optimization).
+## Documentation Contents
 
-## Contents
+Use the navigation to explore the following sections:
 
-Use the navigation on the left to read:
+* **[Introduction](01-introduction.md)**: Overview of the package, goals, and high-level workflow.
+* **[Mathematical Formulation](02-mathematical-formulation.md)**: Deep dive into the $Y_{bus}$ construction, Kron reduction, and capacity optimization algorithms.
+* **[Model Usage](03-model-usage.md)**: Installation guides, configuration settings, and how to run your first case study.
+* **[API Reference](04-api.md)**: Detailed documentation of functions and types.
+* **[Contributing Guidelines](05-contributing.md)**: Contributing guidelines for developers
 
-- Introduction
-- Mathematical formulation
-- Model usage
-- Contributing
-- API
+---
