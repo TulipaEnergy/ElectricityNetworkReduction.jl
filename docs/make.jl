@@ -22,14 +22,7 @@ makedocs(;
     format = Documenter.HTML(;
         canonical = "https://TulipaEnergy.github.io/ElectricityNetworkReduction.jl",
     ),
-    pages = [
-        "Home" => "index.md",
-        "Introduction" => "01-introduction.md",
-        "Mathematical Formulation" => "02-mathematical-formulation.md",
-        "Model Usage" => "03-model-usage.md",
-        "API Reference" => "04-api.md",
-        "Contributing Guidelines" => "05-contributing.md",
-    ],
+    pages = ["index.md"; numbered_pages],
 )
 
 deploydocs(; repo = "github.com/TulipaEnergy/ElectricityNetworkReduction.jl")
