@@ -22,7 +22,7 @@ makedocs(;
         "Mathematical Formulation" => "02-mathematical-formulation.md",
         "Model Usage" => "03-model-usage.md",
         "API Reference" => "04-api.md",
-        "Contributing Guidelines" => "05-contributing.md",
+        "Contributing Guidelines" => "contributing.md",
     ],
 )
 
