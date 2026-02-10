@@ -1,6 +1,6 @@
-# [Contributing Guidelines]
+# Contributing Guidelines
 
-Great that you want to contribute to the development of the NetworkReduction.jl! Please read these guidelines to get you started.
+Great that you want to contribute to the development of the ElectricityNetworkReduction.jl! Please read these guidelines to get you started.
 
 ## GitHub Rules of Engagement
 
@@ -8,7 +8,7 @@ Great that you want to contribute to the development of the NetworkReduction.jl!
 - All PR's should have an associated issue (unless it's a very minor fix).
 - Assign yourself to issues you want to address. Consider if you will be able to work on them in the near future (this week) — if not, leave them available for someone else.
 - When finalizing a pull request, set the Status to "Ready for Review." If someone specific needs to review it, assign them as the reviewer (otherwise anyone can review).
-- Issues without updates for 60 days (and PRs without updates in 30 days) will be labelled as "stale" and filtered out of view. There is a Stale project board to view and revive these.
+- Issues without updates for 60 days (and PRs without updates in 30 days) will be labelled as "stale" and filtered out of view. There is a Stale project board to view and rev
 
 ## Contributing Workflow
 
