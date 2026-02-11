@@ -1,4 +1,4 @@
-From_Name,To_Name,TTC_Original_MW,TTC_Equivalent_MW,TTC_Mismatch_MW,TTC_Error_Pct,limiting_line_from,limiting_synth_line_from
+From_node,To_node,TTC_Original_MW,TTC_Equivalent_MW,TTC_Mismatch_MW,TTC_Error_Pct,limiting_line_from,limiting_synth_line_from
 2,3,95.58036432721396,95.58032005492556,-4.427228839176678e-5,-4.631943883390432e-5,2,0
 2,5,99.375867558278,99.37581348818831,-5.407008968916216e-5,-5.440967814188217e-5,2,0
 3,5,159.07362019371294,159.07356277473997,-5.7418972971845506e-5,-3.609584851462058e-5,5,0
