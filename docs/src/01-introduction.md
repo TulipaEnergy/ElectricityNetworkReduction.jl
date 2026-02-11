@@ -74,6 +74,8 @@ This package is intended for Transmission System Operators (TSOs), grid planning
 
 ## License
 
+This content is released under the [Apache License 2.0](https://www.apache.org/licenses/LICENSE-2.0) License.
+
 ---
 
 ## Citation
