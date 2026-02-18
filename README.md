@@ -15,8 +15,6 @@
 
 It is a package for simplifying detailed electrical networks into compact equivalents without losing the transfer characteristics. Starting from raw data, it selects representative nodes, performs Kron reduction, and optimizes synthetic line capacities.
 
----
-
 ## How to Cite
 
 If you use ElectricityNetworkReduction.jl in your work, please cite using the reference given in [CITATION.cff](https://github.com/TulipaEnergy/ElectricityNetworkReduction.jl/blob/main/CITATION.cff).
@@ -31,11 +29,15 @@ See the [documentation](https://tulipaenergy.github.io/ElectricityNetworkReducti
 
 ## Contributing
 
-If you want to make contributions of any kind, please first that a look into our contributing guide directly on GitHub or the contributing page on the website
+If you want to make contributions of any kind, please first that a look into our contributing guide directly on GitHub or the contributing page on the website.
+
+## License
+
+This content is released under the [Apache License 2.0](https://www.apache.org/licenses/LICENSE-2.0) License.
 
 ---
 
-### Contributors
+## Contributors
 
 <!-- ALL-CONTRIBUTORS-LIST:START - Do not remove or modify this section -->
 <!-- prettier-ignore-start -->
