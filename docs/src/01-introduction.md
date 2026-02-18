@@ -71,15 +71,3 @@ This enables fast, accurate, and scalable power system studies.
 This package is intended for Transmission System Operators (TSOs), grid planning analysts, and energy system researchers involved in large-scale interconnection studies or long-term planning.
 
 ---
-
-## License
-
-This content is released under the [Apache License 2.0](https://www.apache.org/licenses/LICENSE-2.0) License.
-
----
-
-## Citation
-
-If you use this package in academic work, please cite:
-
-> ElectricityNetworkReduction.jl – A Julia Toolkit for Power System Network Reduction and Equivalencing

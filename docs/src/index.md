@@ -9,4 +9,19 @@ Use the navigation to explore the following sections:
 * **[API Reference](04-api.md)**: Detailed documentation of functions and types.
 * **[Contributing Guidelines](contributing.md)**: Contributing guidelines for developers
 
----
+## [License](@id license)
+
+This content is released under the [Apache License 2.0](https://www.apache.org/licenses/LICENSE-2.0) License.
+
+## Contributors
+
+```@raw html
+<!-- ALL-CONTRIBUTORS-LIST:START - Do not remove or modify this section -->
+<!-- prettier-ignore-start -->
+<!-- markdownlint-disable -->
+
+<!-- markdownlint-restore -->
+<!-- prettier-ignore-end -->
+
+<!-- ALL-CONTRIBUTORS-LIST:END -->
+```
