@@ -1,5 +1,25 @@
 {
-  "projectName": "ElectricityNetworkReduction",
+  "projectName": "ElectricityNetworkReduction.jl",
   "projectOwner": "TulipaEnergy",
-  "files": ["README.md", "docs/src/index.md"]
+  "files": [
+    "README.md",
+    "docs/src/index.md"
+  ],
+  "commitType": "docs",
+  "commitConvention": "angular",
+  "contributorsPerLine": 7,
+  "contributors": [
+    {
+      "login": "g-moralesespana",
+      "name": "Germán Morales",
+      "avatar_url": "https://avatars.githubusercontent.com/u/42405171?v=4",
+      "profile": "https://github.com/g-moralesespana",
+      "contributions": [
+        "research",
+        "ideas",
+        "fundingFinding",
+        "projectManagement"
+      ]
+    }
+  ]
 }
