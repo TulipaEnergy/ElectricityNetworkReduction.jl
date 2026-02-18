@@ -31,6 +31,17 @@
         "review",
         "projectManagement"
       ]
+    },
+    {
+      "login": "MNuman07",
+      "name": "Muhammad Numan",
+      "avatar_url": "https://avatars.githubusercontent.com/u/191888232?v=4",
+      "profile": "https://github.com/MNuman07",
+      "contributions": [
+        "research",
+        "ideas",
+        "code"
+      ]
     }
   ]
 }
