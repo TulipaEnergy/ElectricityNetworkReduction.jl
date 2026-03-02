@@ -114,14 +114,17 @@ Before running a case study, you should update the relevant configuration parame
 using NetworkReduction
 
 # Example configuration
-CONFIG.input_filename = "case118.xlsx"      # Input Excel file name
+CONFIG.input_filename = "case118.xlsx"    # Input Excel file name
 CONFIG.case_study = "case118"             # Case study identifier
 CONFIG.optimization_type = "QP"           # Options: "QP", "LP", or "MIQP"
 CONFIG.base              = 100.0          # System MVA base
-CONFIG.bus_names_as_int  = false           # true if bus IDs are integers, false if strings
-CONFIG.in_pu             = false           # true if input data (R, X, B) are already in per-unit
+CONFIG.bus_names_as_int  = false          # true if bus IDs are integers, false if strings
+CONFIG.in_pu             = false          # true if input data (R, X, B) are already in per-unit
 CONFIG.ptdf_epsilon = 0.001               # PTDF zero threshold
 CONFIG.suffix = "QP"                      # Output file suffix
+allow_virtual_lines::Bool = false         # set to false to eliminate virtual lines
+rep_node_mode::String = "auto"            # "auto" or "manual_excel"
+rep_node_k_per_zone::Int = 1              # Number of highest-degree nodes to select per zone
 ```
 
 ### Key Configuration Parameters
@@ -147,6 +150,14 @@ Set to true if bus identifiers are numeric (e.g. 101, 205), or false if they are
 * in_pu:
 Set to true if line parameters (R, X, B) are already provided in per-unit.
 If false, the model will convert values from physical units using voltage and current ratings.
+
+* allow_virtual_lines:
+set to false to eliminate virtual lines that are not connected in the original network between two zones
+
+* rep_node_mode:
+two modes are used i.e auto or manual excel. if auto mode is selected, rep_node_k_per_zone is used to select number
+of nodes per zone. if manual_excel mode is selected, the representative nodes should be provided in the
+IsRepresentative column of the bus data
 
 ### Step 2: Specify Input and Output Directories
 

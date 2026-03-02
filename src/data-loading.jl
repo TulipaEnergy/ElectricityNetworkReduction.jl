@@ -84,12 +84,11 @@ function convert_line_to_pu!(
     lines_df[!, :Capacity_pu] = lines_df.Capacity_MW ./ Sbase
     return lines_df
 end
-
 """
     rename_buses(nodes_df, generators_df, lines_df, tie_lines_df, Sbase)
 
-Rename buses to uppercase, create numerical mapping, and convert data to per-unit.
-Returns processed line DataFrames and node information.
+Rename buses, create numerical mapping, convert to per-unit,
+and **preserve the IsRepresentative column** from Excel.
 """
 function rename_buses(
     nodes_df::DataFrame,
@@ -101,25 +100,18 @@ function rename_buses(
     bus_as_int::Bool = CONFIG.bus_names_as_int,
 )
 
-    # Define how to handle bus identifiers based on the config
+    # ------------------------------------------------------------------
+    # Bus name cleaning
+    # ------------------------------------------------------------------
     if bus_as_int
-        # Just convert to string for consistent mapping
         clean_bus_names = x -> string.(x)
     else
-        # Standard cleaning for string names
         clean_bus_names = x -> uppercase.(strip.(string.(x)))
     end
 
-    # Original string handling (uppercase conversion)
     transform!(nodes_df, :Bus => clean_bus_names => :Bus)
     transform!(generators_df, :Bus => clean_bus_names => :Bus)
-    transform!(lines_df, [:From_node, :To_node] .=> (x -> uppercase.(strip.(string.(x)))))
-    transform!(
-        tie_lines_df,
-        [:From_node, :To_node] .=> (x -> uppercase.(strip.(string.(x)))),
-    )
 
-    # For lines and tielines, we apply it to both From and To columns
     for df in [lines_df, tie_lines_df]
         if !isempty(df)
             df[!, :From_node] = clean_bus_names(df.From_node)
@@ -127,23 +119,18 @@ function rename_buses(
         end
     end
 
-    lines_df = convert_line_to_pu!(lines_df, Sbase, in_pu = in_pu)
-    tie_lines_df = convert_line_to_pu!(tie_lines_df, Sbase, in_pu = in_pu)
+    lines_df = convert_line_to_pu!(lines_df, Sbase; in_pu = in_pu)
+    tie_lines_df = convert_line_to_pu!(tie_lines_df, Sbase; in_pu = in_pu)
 
-    bus_map = Dict{String,Int}()
-    for (idx, bus_name) in enumerate(nodes_df.Bus)
-        bus_map[bus_name] = idx
-    end
+    # ------------------------------------------------------------------
+    # Build bus map
+    # ------------------------------------------------------------------
+    bus_map =
+        Dict{String,Int}(bus_name => idx for (idx, bus_name) in enumerate(nodes_df.Bus))
 
-    # Helper function to consistently convert Area and Zone to String
-    function convert_to_string(value)
-        if ismissing(value)
-            return ""
-        else
-            return string(value)  # Convert integers, floats, etc. to string
-        end
-    end
-
+    # ------------------------------------------------------------------
+    # Create node_data with IsRepresentative preserved
+    # ------------------------------------------------------------------
     node_data = DataFrame(
         old_name = String[],
         new_id = Int[],
@@ -157,27 +144,39 @@ function rename_buses(
         bus_type = Int[],
         Area = String[],
         Zone = String[],
-        is_representative = Bool[],
+        is_representative = Bool[],          # internal flag (used by the model)
+        IsRepresentative = Bool[],          # preserved from Excel
+        Latitude = Float64[],
+        Longitude = Float64[],
     )
 
     function power_to_pu(value)
-        ismissing(value) ? 0.0 : value / Sbase
+        ismissing(value) ? 0.0 : Float64(value) / Sbase
+    end
+
+    function convert_to_string(value)
+        ismissing(value) ? "" : string(value)
     end
 
     for (idx, bus_row) in enumerate(eachrow(nodes_df))
         bus_name = bus_row.Bus
 
-        # Handle Area and Zone conversion
-        area_value = bus_row.Area
-        zone_value = bus_row.Zone
+        # --- Parse IsRepresentative from Excel ---
+        is_rep_excel = false
+        if hasproperty(bus_row, :IsRepresentative) && !ismissing(bus_row.IsRepresentative)
+            v = bus_row.IsRepresentative
+            is_rep_excel =
+                (v === true || v == 1 || lowercase(string(v)) ∈ ("yes", "y", "true", "1"))
+        end
 
-        area_str = convert_to_string(area_value)
-        zone_str = convert_to_string(zone_value)
+        # --- Latitude / Longitude protection ---
+        lat_val =
+            hasproperty(bus_row, :Latitude) && !ismissing(bus_row.Latitude) ?
+            Float64(bus_row.Latitude) : 0.0
+        lon_val =
+            hasproperty(bus_row, :Longitude) && !ismissing(bus_row.Longitude) ?
+            Float64(bus_row.Longitude) : 0.0
 
-        bus_node = filter(:Bus => x -> x == bus_name, nodes_df)
-        isempty(bus_node) && error("Bus $bus_name not found in nodes DataFrame")
-
-        # Create a NamedTuple with all values
         new_row = (
             old_name = bus_name,
             new_id = idx,
@@ -189,18 +188,25 @@ function rename_buses(
             Va_rad = ismissing(bus_row.Va) ? 0.0 : deg2rad(Float64(bus_row.Va)),
             baseKV = ismissing(bus_row.baseKV) ? 0.0 : Float64(bus_row.baseKV),
             bus_type = ismissing(bus_row.Type) ? 1 : Int(bus_row.Type),
-            Area = area_str,
-            Zone = zone_str,
-            is_representative = false,
+            Area = convert_to_string(bus_row.Area),
+            Zone = convert_to_string(bus_row.Zone),
+            is_representative = false,           # will be set later by selection function
+            IsRepresentative = is_rep_excel,    # preserved from Excel
+            Latitude = lat_val,
+            Longitude = lon_val,
         )
 
-        # Use push! with promote=true to handle type conversions automatically
-        push!(node_data, new_row, promote = true)
+        push!(node_data, new_row; promote = true)
     end
 
+    # ------------------------------------------------------------------
+    # Map From/To to new numerical IDs
+    # ------------------------------------------------------------------
     for df in [lines_df, tie_lines_df]
-        df[!, :From] = [bus_map[name] for name in df.From_node]
-        df[!, :To] = [bus_map[name] for name in df.To_node]
+        if !isempty(df)
+            df[!, :From] = [bus_map[name] for name in df.From_node]
+            df[!, :To] = [bus_map[name] for name in df.To_node]
+        end
     end
 
     return lines_df, tie_lines_df, node_data

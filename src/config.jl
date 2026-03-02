@@ -10,19 +10,31 @@ Modify the default values below to run different case studies.
 """
 Base.@kwdef mutable struct Config
     # Data input/output
-    input_filename::String = "NL_HV_Network.xlsx"   # Input Excel file name
-    case_study::String = "case_NL"                  # Case study identifier
+    input_filename::String = "case118.xlsx"   # Input Excel file name
+    case_study::String = "case118"                  # Case study identifier
+
 
     # Flags that change per case study
     bus_names_as_int::Bool = false      # true if bus names are integers
     in_pu::Bool = false                 # true if R,X,B are already in pu
+    allow_virtual_lines::Bool = false   # set to false to eliminate virtual lines
 
     # Numerical parameters
     base::Float64 = 100.0               # MVA base for per-unit conversion
-    optimization_type::String = "QP"    # "MIQP", "QP", or "LP"
+    optimization_type::String = "MIQP"    # "MIQP", "QP", or "LP"
     lambda::Float64 = 1e-6              # Regularization parameter
     ptdf_epsilon::Float64 = 1e-6        # PTDF zero threshold
-    suffix::String = "QP"               # Suffix for output files
+    suffix::String = "MIQP"               # Suffix for output files
+
+    # Representative node selection
+    rep_node_mode::String = "auto"      # "auto" or "manual_excel"
+
+    # Only used when rep_node_mode == "auto"
+    rep_node_k_per_zone::Int = 1        # Number of highest-degree nodes to select per zone
+
+    # Used in both modes for degree calculation
+    rep_node_degree_threshold::Float64 = 1e-8
+
 end
 
 # Create a global config instance

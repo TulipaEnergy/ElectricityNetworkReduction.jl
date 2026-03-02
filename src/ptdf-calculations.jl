@@ -39,6 +39,7 @@ function calculate_all_ttc_results(
     total = N * (N - 1) ÷ 2
     done = 0
     t0 = time()
+    next_progress = 10.0  # First report at 10%
 
     # 4. On-the-fly TTC Calculation Loop
     for a = 1:N
@@ -49,14 +50,21 @@ function calculate_all_ttc_results(
             push!(results, (a, b, ttc, lim[1], lim[2]))
             done += 1
 
-            # PROGRESS REPORTING
-            if done % 5000 == 0 || done == total
+            # PROGRESS REPORTING - show at every 10%
+            progress = (100.0 * done) / total
+
+            if progress >= next_progress || done == total
                 elapsed = time() - t0
                 rate = done / elapsed
-                progress = (100.0 * done) / total
+
+                # Show the actual progress percentage (rounded) at each report
+                reported_percent = done == total ? 100 : min(next_progress, 100)
+
                 println(
-                    "TTC progress: $(round(progress, digits=1))% | $(round(rate)) trans/s",
+                    "TTC progress: $(Int(reported_percent))% | $(round(rate, digits=1)) trans/s",
                 )
+
+                next_progress += 10.0  # Move to next 10% threshold
             end
         end
     end
@@ -111,7 +119,7 @@ function calculate_single_injection_ptdfs(
     return ptdf_single, lines
 end
 
-# --- PRIVATE HELPER ---
+# --- HELPER FUNCTION---
 function _calculate_ttc_internal(ptdf_single, lines_info, line_caps, a, b)
     # PTDF(a->b) = PTDF(a) - PTDF(b)
     ptdf_ab = ptdf_single[a] .- ptdf_single[b]
@@ -154,8 +162,8 @@ function calculate_ptdfs_reduced(
     results = DataFrame(
         transaction_from_orig = Int[],
         transaction_to_orig = Int[],
-        synth_line_from = Int[], # These will be original IDs
-        synth_line_to = Int[],   # These will be original IDs
+        synth_line_from = Int[],
+        synth_line_to = Int[],
         PTDF_value = Float64[],
     )
 

@@ -55,6 +55,8 @@ function optimize_equivalent_capacities(
     lambda::Float64 = CONFIG.lambda,
     bigM_factor::Float64 = 5.0,
     max_C_factor::Float64 = 3.0,
+    allow_virtual_lines::Bool = CONFIG.allow_virtual_lines,
+    allowed_synth_pairs::Set{Tuple{Int,Int}} = Set{Tuple{Int,Int}}(),
 )
     println("\n--- OPTIMIZING EQUIVALENT CAPACITIES (Type: $Type) ---")
 
@@ -63,22 +65,69 @@ function optimize_equivalent_capacities(
 
     if Type == "MIQP"
         println("Note: MIQP converted to MILP (linearized)")
+        println("Selected solver: HiGHS")
+    else
+        println("Selected solver: Ipopt")
     end
-    println("Selected solver: Ipopt")
-
     # ------------------------------------------------------------
     # 1. DATA PREPARATION (COMMON FOR ALL MODELS)
     # ------------------------------------------------------------
 
-    # Get unique synthetic lines
+    # Get unique synthetic lines from PTDF results
     synth_lines_df = unique(ptdf_reduced_results, [:synth_line_from, :synth_line_to])
 
+    println("Candidate synthetic lines BEFORE any filtering: $(nrow(synth_lines_df))")
+    #for row in eachrow(synth_lines_df)
+    #    println("  $(row.synth_line_from) → $(row.synth_line_to)")
+    #end
+
+    # ── Save the original unfiltered candidates for possible fallback ──
+    original_candidates = copy(synth_lines_df)
+
+    # === FILTER VIRTUAL LINES IF REQUESTED ===
+
+    if !allow_virtual_lines
+        println("→ Virtual lines disabled per config.")
+        println("   Keeping ONLY synth lines that correspond to original topology:")
+        println("     • ALL intra-zone synthetic lines")
+        println(
+            "     • Inter-zone synthetic lines ONLY if zones had direct physical connection",
+        )
+        old_count = nrow(synth_lines_df)
+
+        filter!(row -> begin
+            u = min(row.synth_line_from, row.synth_line_to)
+            v = max(row.synth_line_from, row.synth_line_to)
+            (u, v) ∈ allowed_synth_pairs
+        end, synth_lines_df)
+
+        new_count = nrow(synth_lines_df)
+        println("Remaining after topology-preserving filter: $new_count (was $old_count)")
+
+        # Automatic fallback
+        if new_count == 0
+            if old_count == 0
+                @error "PTDF results contain no synthetic lines at all..."
+                throw(ArgumentError("No candidate lines from Kron reduction"))
+            else
+                println(" No lines retained after topology filter.")
+                println(
+                    "→ Automatically enabling virtual lines for this run to avoid empty network.",
+                )
+                allow_virtual_lines = true
+                synth_lines_df = original_candidates
+                println("Restored $(nrow(synth_lines_df)) virtual/synthetic lines.")
+            end
+        end
+    end
+
+    # ── Build canonical edge list and mapping ─────────────────────────────
     synth_lines = Tuple{Int,Int}[]
     synth_line_map = Dict{Tuple{Int,Int},Int}()
 
     for row in eachrow(synth_lines_df)
-        u, v = min(row.synth_line_from, row.synth_line_to),
-        max(row.synth_line_from, row.synth_line_to)
+        u = min(row.synth_line_from, row.synth_line_to)
+        v = max(row.synth_line_from, row.synth_line_to)
         key = (u, v)
         if !haskey(synth_line_map, key)
             push!(synth_lines, key)
@@ -87,7 +136,6 @@ function optimize_equivalent_capacities(
     end
 
     L = 1:length(synth_lines)  # Synthetic line indices
-
     # Get reduced network bus IDs
     rn_ids = unique(
         vcat(
@@ -155,7 +203,6 @@ function optimize_equivalent_capacities(
             push!(relevant_txns_per_line[l], t)
         end
     end
-
     # ------------------------------------------------------------
     # 2. MODEL SELECTION AND SETUP
     # ------------------------------------------------------------
@@ -291,7 +338,7 @@ function _solve_miqp_model(
     PTDF::Dict{Tuple{Int,Int},Float64},
     relevant_lines_per_txn::Vector{Vector{Int}},
     relevant_txns_per_line::Vector{Vector{Int}};
-    bigM_factor::Float64 = 5.0,   # Add this parameter
+    bigM_factor::Float64 = 5.0,
     max_C_factor::Float64 = 3.0,
 )
     println(
@@ -368,7 +415,7 @@ function _solve_miqp_model(
         end
     end
 
-    # E. Physical upper bounds on TTC (very important)
+    # E. Physical upper bounds on TTC
     for t in TR, l in relevant_lines_per_txn[t]
         @constraint(model, TTC_eq[t] ≤ C_eq[l] / PTDF[(t, l)])
     end
@@ -432,8 +479,8 @@ function _solve_lp_model(
 )
     println("Setting up LP model...")
 
-    # Use Ipopt for LP
-    model = Model(Ipopt.Optimizer)
+    # Use HiGHS for LP
+    model = Model(HiGHS.Optimizer)
     set_silent(model)
 
     # Variables
@@ -490,31 +537,39 @@ end
 
 function _extract_capacities(
     model::Model,
-    synth_lines::Vector{Tuple{Int,Int}},
-    L::UnitRange{Int},
-    TR::UnitRange{Int},
-    ttc_orig::Vector{Float64},
-    Type::String = CONFIG.optimization_type,
+    synth_lines,
+    L,
+    TR,
+    ttc_orig,
+    Type = CONFIG.optimization_type,
 )
-    # Extract only capacities
-    C_vals = value.(model[:C_eq])
-
-    equivalent_capacities =
-        DataFrame(synth_line_from = Int[], synth_line_to = Int[], C_eq_pu = Float64[])
-
-    for (i, (u, v)) in enumerate(synth_lines)
-        push!(equivalent_capacities, (u, v, C_vals[i]))
+    if isempty(L) || length(synth_lines) == 0
+        println("\n=== $Type Optimization Results ===")
+        println(
+            "No lines in reduced network (likely allow_virtual_lines=false + no direct physical links between rep nodes)",
+        )
+        println("→ Returning empty equivalent capacities DataFrame")
+        return DataFrame(
+            synth_line_from = Int[],
+            synth_line_to = Int[],
+            C_eq_pu = Float64[],
+        )
     end
 
-    # Print statistics
+    C_vals = value.(model[:C_eq])
+
     println("\n=== $Type Optimization Results ===")
     println("C_eq statistics:")
-    println("  Min: $(round(minimum(C_vals); digits=6)) pu")
-    println("  Max: $(round(maximum(C_vals); digits=6)) pu")
+    println("  Min:  $(round(minimum(C_vals); digits=6)) pu")
+    println("  Max:  $(round(maximum(C_vals); digits=6)) pu")
     println("  Mean: $(round(mean(C_vals); digits=6)) pu")
-    println("  Std: $(round(std(C_vals); digits=6)) pu")
+    println("  Std:  $(round(std(C_vals); digits=6)) pu")
 
-    return equivalent_capacities
+    df = DataFrame(synth_line_from = Int[], synth_line_to = Int[], C_eq_pu = Float64[])
+    for (i, (u, v)) in enumerate(synth_lines)
+        push!(df, (u, v, C_vals[i]))
+    end
+    return df
 end
 
 """
