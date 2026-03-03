@@ -310,7 +310,7 @@ function _solve_qp_model(
     println("QP status: $status")
 
     if status != MathOptInterface.OPTIMAL
-        println("Warning: QP solution status: $status")
+        println("QP solution status: $status")
     end
 
     # Extract results
@@ -479,8 +479,8 @@ function _solve_lp_model(
 )
     println("Setting up LP model...")
 
-    # Use HiGHS for LP
-    model = Model(HiGHS.Optimizer)
+    # Use Ipopt for LP
+    model = Model(Ipopt.Optimizer)
     set_silent(model)
 
     # Variables
@@ -509,7 +509,7 @@ function _solve_lp_model(
     println("LP status: $status")
 
     if status != MathOptInterface.OPTIMAL
-        println("Warning: LP solution status: $status")
+        println("LP solution status: $status")
         if primal_status(model) == MathOptInterface.FEASIBLE_POINT
             println("But found a feasible solution")
         end
