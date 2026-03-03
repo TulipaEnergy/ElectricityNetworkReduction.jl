@@ -129,25 +129,23 @@ rep_node_k_per_zone::Int = 1              # Number of highest-degree nodes to se
 
 ### Key Configuration Parameters
 
-* Input_filename:
+`input_filename`:
 Name of the input data file (Excel or CSV). This file must exist inside the specified input directory (test/inputs/) and contain the required sheets/files (Lines, Tielines, Nodes, Generators).
 
-* Optimization_type:
+`optimization_type`:
 Selects the method used to determine equivalent line capacities:
 
 * "QP": Quadratic Programming (recommended default)
-
 * "LP": Linear Programming
-
 * "MIQP": Mixed-Integer formulation (binding line selection)
 
-* base:
+`base`:
 System base power in MVA. All results are internally computed in per-unit and exported in MW using this base.
 
-* bus_names_as_int:
+`bus_names_as_int`:
 Set to true if bus identifiers are numeric (e.g. 101, 205), or false if they are strings (e.g. "Bus_101").
 
-* in_pu:
+`in_pu`:
 Set to true if line parameters (R, X, B) are already provided in per-unit.
 If false, the model will convert values from physical units using voltage and current ratings.
 
@@ -169,10 +167,10 @@ input_dir  = "test/inputs/case118"
 output_dir = "test/outputs/case118"
 ```
 
-* Input directory:
+`input_dir`:
 Contains the grid data file specified by CONFIG.input_filename.
 
-* Output directory:
+`output_dir`:
 Will be created automatically (if it does not exist) and populated with all intermediate and final results.
 
 ### Step 3: Execute the Full Analysis Pipeline
@@ -209,15 +207,15 @@ After the run completes, the output directory will contain several CSV files doc
 
 #### Key Output Files
 
-* Equivalent_Capacities.csv:
+`Equivalent_Capacities.csv`:
 Contains the optimized capacities of synthetic lines in the reduced network.
 These capacities define the thermal limits of the equivalent model and are expressed in MW on the specified base.
 
-* TTC_Comparison.csv:
+`TTC_Comparison.csv`:
 Provides a detailed comparison of Total Transfer Capacities (TTCs) between the original full network and the reduced equivalent network.
- This file includes absolute and percentage errors, allowing you to assess how accurately the reduced model preserves inter-zonal transfer limits.
+This file includes absolute and percentage errors, allowing you to assess how accurately the reduced model preserves inter-zonal transfer limits.
 
-* PTDF_Reduced_Network.csv:
+`PTDF_Reduced_Network.csv`:
 Contains Power Transfer Distribution Factors (PTDFs) for the reduced network.
 These sensitivities can be directly used in optimisation models such as DC OPF, unit commitment, or market simulations.
 

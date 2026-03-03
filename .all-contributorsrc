@@ -1,5 +1,57 @@
 {
-  "projectName": "ElectricityNetworkReduction",
+  "projectName": "ElectricityNetworkReduction.jl",
   "projectOwner": "TulipaEnergy",
-  "files": ["README.md", "docs/src/index.md"]
+  "files": [
+    "README.md",
+    "docs/src/index.md"
+  ],
+  "commitType": "docs",
+  "commitConvention": "angular",
+  "contributorsPerLine": 7,
+  "contributors": [
+    {
+      "login": "g-moralesespana",
+      "name": "Germán Morales",
+      "avatar_url": "https://avatars.githubusercontent.com/u/42405171?v=4",
+      "profile": "https://github.com/g-moralesespana",
+      "contributions": [
+        "research",
+        "ideas",
+        "fundingFinding",
+        "projectManagement"
+      ]
+    },
+    {
+      "login": "gnawin",
+      "name": "Ni Wang",
+      "avatar_url": "https://avatars.githubusercontent.com/u/125902905?v=4",
+      "profile": "https://github.com/gnawin",
+      "contributions": [
+        "code",
+        "review",
+        "projectManagement"
+      ]
+    },
+    {
+      "login": "MNuman07",
+      "name": "Muhammad Numan",
+      "avatar_url": "https://avatars.githubusercontent.com/u/191888232?v=4",
+      "profile": "https://github.com/MNuman07",
+      "contributions": [
+        "research",
+        "ideas",
+        "code"
+      ]
+    },
+    {
+      "login": "juan-giraldo-ch",
+      "name": "juan-giraldo-ch",
+      "avatar_url": "https://avatars.githubusercontent.com/u/56868578?v=4",
+      "profile": "https://github.com/juan-giraldo-ch",
+      "contributions": [
+        "research",
+        "ideas"
+      ]
+    }
+  ]
 }
