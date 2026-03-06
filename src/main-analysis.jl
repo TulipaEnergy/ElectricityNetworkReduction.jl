@@ -52,7 +52,16 @@ function main_full_analysis(input_data_dir::String, output_data_dir::String)
         tie_lines,
         CONFIG.base,
     )
+    # --- 1: Island Detection & Original Plot ---
+    components, node_info, g_orig =
+        detect_islands(numbered_lines, numbered_tielines, node_info)
 
+    all_orig_lines = vcat(numbered_lines, numbered_tielines, cols = :union)
+
+    # Just create the plot object (do not display)
+    plt_orig = plot_network(g_orig, node_info, all_orig_lines; title = "Original Network")
+
+    # Y-bus
     Ybus_original =
         form_ybus_with_shunt(numbered_lines, numbered_tielines, node_info, CONFIG.base)
     n_buses = size(Ybus_original, 1)
@@ -70,30 +79,132 @@ function main_full_analysis(input_data_dir::String, output_data_dir::String)
     )
 
     # --- 1. REPRESENTATIVE NODE SELECTION ---
-    rep_nodes_df, node_info = select_representative_nodes(Ybus_original, node_info)
+    rep_nodes_df, node_info = select_representative_nodes(
+        Ybus_original,
+        node_info,
+        numbered_lines,
+        numbered_tielines,
+    )
     rep_node_ids = rep_nodes_df.new_id
     println("\nSelected Representative Nodes (Original IDs): $rep_node_ids")
 
     println("\nValidating PTDF engine for all representative node transactions...")
 
+    # === VIRTUAL LINE FILTER ===
+    # Computes exactly which synthetic lines to keep when allow_virtual_lines = false.
+    id_to_zone = Dict{Int,String}(row.new_id => row.Zone for row in eachrow(node_info))
+
+    zone_direct_pairs = Set{Tuple{String,String}}()
+    all_orig_lines = vcat(numbered_lines, numbered_tielines, cols = :union)
+    for row in eachrow(all_orig_lines)
+        zf = id_to_zone[row.From]
+        zt = id_to_zone[row.To]
+        if zf != zt
+            push!(zone_direct_pairs, (min(zf, zt), max(zf, zt)))
+        end
+    end
+    println(
+        "Direct inter-zone physical connections detected: $(length(zone_direct_pairs)) zone pairs.",
+    )
+
+    # Allowed pairs = intra-zone (always) + inter-zone with direct tie
+    allowed_synth_pairs = Set{Tuple{Int,Int}}()
+    n_rep = length(rep_node_ids)
+    for i = 1:n_rep
+        for j = i+1:n_rep
+            u, v = rep_node_ids[i], rep_node_ids[j]
+            zu, zv = id_to_zone[u], id_to_zone[v]
+            if zu == zv || (zu != zv && (min(zu, zv), max(zu, zv)) in zone_direct_pairs)
+                push!(allowed_synth_pairs, (min(u, v), max(u, v)))
+            end
+        end
+    end
+    println(
+        "Allowed synthetic line pairs when allow_virtual_lines=false: $(length(allowed_synth_pairs))",
+    )
+    println("   (all intra-zone + only direct inter-zone)")
+
     # --- 2. ORIGINAL NETWORK ANALYSIS  ---
-    # New memory-efficient call:
+    # Computes TTC for the full original network (needed for optimization)
+    println("\n--- 2. ORIGINAL NETWORK ANALYSIS ---")
     ttc_results, line_capacities_pu =
         calculate_all_ttc_results(Ybus_original, numbered_lines, numbered_tielines)
-    # NOTE: ptdf_results is no longer stored for the full network.
+
+    println("Original network TTC analysis completed: $(nrow(ttc_results)) transactions.")
 
     # --- 3. KRON REDUCTION & REDUCED PTDF CALCULATION ---
-    println("\n--- 3. KRON REDUCTION & REDUCED PTDF CALCULATION (Canonical) ---")
     Y_kron = kron_reduce_ybus(Ybus_original, rep_node_ids)
     ptdf_reduced_results = calculate_ptdfs_reduced(Y_kron, rep_node_ids)
 
     # --- 4. OPTIMIZATION FOR EQUIVALENT CAPACITIES ---
     equivalent_capacities_df, ttc_equivalent = optimize_equivalent_capacities(
         ttc_results,
-        ptdf_reduced_results,
+        ptdf_reduced_results;
         Type = CONFIG.optimization_type,
         lambda = CONFIG.lambda,
-    )  # "MIQP" or "QP" or "LP"
+        allow_virtual_lines = CONFIG.allow_virtual_lines,
+        allowed_synth_pairs = allowed_synth_pairs,
+    )
+
+    # --- Extract Reactance from Y_kron ---
+    if !isnothing(equivalent_capacities_df)
+        # Create local mapping to access Y_kron indices
+        rep_id_to_local = Dict(id => i for (i, id) in enumerate(rep_node_ids))
+
+        # Initialize the X_pu column
+        equivalent_capacities_df[!, :X_pu] = zeros(nrow(equivalent_capacities_df))
+
+        for row in eachrow(equivalent_capacities_df)
+            # Map original IDs back to matrix indices
+            i = rep_id_to_local[row.synth_line_from]
+            j = rep_id_to_local[row.synth_line_to]
+
+            # The off-diagonal element Y[i,j] is equal to -1/X_ij (the susceptance)
+            b_val = imag(Y_kron[i, j])
+
+            # Reactance X = -1 / B (absolute value used to ensure positive reactance for lines)
+            row.X_pu = abs(b_val) > 1e-10 ? 1.0 / b_val : 0.0
+        end
+    end
+
+    # --- Reduced Network Plot ---
+
+    if !isnothing(equivalent_capacities_df)
+        # 1. Create mapping for representative nodes
+        rep_id_to_local = Dict(id => i for (i, id) in enumerate(rep_node_ids))
+
+        # 2. Build graph using synthetic properties
+        g_reduced = SimpleGraph(length(rep_node_ids))
+        for row in eachrow(equivalent_capacities_df)
+            u = rep_id_to_local[row.synth_line_from]
+            v = rep_id_to_local[row.synth_line_to]
+            add_edge!(g_reduced, u, v)
+        end
+
+        # 3. Plot reduced network using only synth properties
+        rep_node_info = filter(row -> row.new_id in rep_node_ids, node_info)
+        plt_red = plot_network(
+            g_reduced,
+            rep_node_info,
+            equivalent_capacities_df;
+            title = "Reduced Network",
+        )
+    end
+
+    # --- Side-by-side visualization: Original vs Reduced ---
+    plt_comparison = plot_original_vs_reduced(
+        g_orig,
+        node_info,
+        all_orig_lines,
+        g_reduced,
+        rep_node_info,
+        equivalent_capacities_df,
+    )
+
+    savefig(
+        plt_comparison,
+        joinpath(output_data_dir, "Network_Original_vs_Reduced_$(CONFIG.suffix).png"),
+    )
 
     # Filter original TTCs to only include canonical RN-to-RN transactions for comparison
     rn_orig_ids = unique(
@@ -123,8 +234,6 @@ function main_full_analysis(input_data_dir::String, output_data_dir::String)
         )
 
         # CONVERT PER-UNIT TO MW (100 MVA base)
-
-        # Convert TTC values from pu to MW
         comparison_df[!, :TTC_Original_MW] = comparison_df.TTC_pu .* CONFIG.base
         comparison_df[!, :TTC_Equivalent_MW] =
             comparison_df.TTC_Equivalent_pu .* CONFIG.base
@@ -158,7 +267,9 @@ function main_full_analysis(input_data_dir::String, output_data_dir::String)
                 :TTC_Mismatch_MW,           # In MW
                 :TTC_Error_Pct,             # In %
                 :limiting_line_from,        # Limiting line in original network
+                :limiting_line_to,          # Original network limiting 'to' node
                 :limiting_synth_line_from,  # Limiting line in equivalent network
+                :limiting_synth_line_to,    # Equivalent network limiting 'to' node
             ],
         ]
 
@@ -213,11 +324,12 @@ function main_full_analysis(input_data_dir::String, output_data_dir::String)
         joinpath(output_data_dir, "PTDF_Reduced_Network_$(CONFIG.suffix).csv")
     CSV.write(output_path_ptdf_reduced, ptdf_reduced_results)
 
+
     # Export equivalent capacities in MW
     if !isnothing(equivalent_capacities_df)
         eq_cap_mw = copy(equivalent_capacities_df)
 
-        # Convert C_eq_pu to MW and rename columns
+        # Convert C_eq_pu to MW
         eq_cap_mw[!, :capacity_MW] = eq_cap_mw.C_eq_pu .* CONFIG.base
         eq_cap_mw[!, :capacity_pu] = eq_cap_mw.C_eq_pu
 
@@ -225,22 +337,28 @@ function main_full_analysis(input_data_dir::String, output_data_dir::String)
         eq_cap_mw[!, :from_node] = [bus_name_map[id] for id in eq_cap_mw.synth_line_from]
         eq_cap_mw[!, :to_node] = [bus_name_map[id] for id in eq_cap_mw.synth_line_to]
 
-        # Rename columns for consistency
+        # Rename and reorder columns, including X_pu
         rename!(eq_cap_mw, :synth_line_from => :from, :synth_line_to => :to)
 
-        # Reorder columns: put MW first for clarity
-        # Include :from_node and :to_node in the selection list
-        eq_cap_mw =
-            eq_cap_mw[!, [:from, :to, :from_node, :to_node, :capacity_MW, :capacity_pu]]
+        final_export_df = eq_cap_mw[
+            !,
+            [:from, :to, :from_node, :to_node, :capacity_MW, :capacity_pu, :X_pu],
+        ]
 
         output_path_eq_cap =
             joinpath(output_data_dir, "Equivalent_Capacities_$(CONFIG.suffix).csv")
-        CSV.write(output_path_eq_cap, eq_cap_mw)
-        println("Equivalent capacities exported in MW to CSV: $output_path_eq_cap")
+        CSV.write(output_path_eq_cap, final_export_df)
+        println("Equivalent capacities exported to: $output_path_eq_cap")
     end
 
     println("\nALL DATA EXPORTED IN MW (100 MVA BASE).")
 
     return
-    ttc_results, ptdf_reduced_results, equivalent_capacities_df, ttc_equivalent
+    ttc_results,
+    ptdf_reduced_results,
+    equivalent_capacities_df,
+    ttc_equivalent,
+    components,
+    node_info,
+    plt_comparison
 end

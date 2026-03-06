@@ -10,6 +10,10 @@ using JuMP
 using MathOptInterface
 using HiGHS
 using Ipopt
+using Graphs
+using GraphRecipes
+using Plots
+using Random
 
 export load_excel_data,
     clean_line_data,
@@ -31,7 +35,10 @@ export load_excel_data,
     main_full_analysis,
     config,
     CONFIG,
-    reset_config!
+    reset_config!,
+    detect_islands,
+    plot_network,
+    plot_original_vs_reduced
 
 #Configuration fie
 include("config.jl")
@@ -62,5 +69,11 @@ include("export-functions.jl")
 
 # Main analysis workflow
 include("main-analysis.jl")
+
+# Detect Islands
+include("island-detection.jl")
+
+# Network visualisation
+include("network-visualisation.jl")
 
 end

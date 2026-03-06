@@ -3,6 +3,8 @@ using Test
 using DataFrames
 using CSV
 
+ENV["GKSwstype"] = "100"
+
 # Folders names
 const INPUT_FOLDER = joinpath(@__DIR__, "inputs")
 const OUTPUT_FOLDER = joinpath(@__DIR__, "outputs")
