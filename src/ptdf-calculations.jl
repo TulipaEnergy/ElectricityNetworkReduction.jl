@@ -119,9 +119,8 @@ function calculate_single_injection_ptdfs(
     return ptdf_single, lines
 end
 
-# --- HELPER FUNCTION---
+# --- HELPER FUNCTION ---
 function _calculate_ttc_internal(ptdf_single, lines_info, line_caps, a, b)
-    # PTDF(a->b) = PTDF(a) - PTDF(b)
     ptdf_ab = ptdf_single[a] .- ptdf_single[b]
     ttc = Inf
     limiting = (0, 0)

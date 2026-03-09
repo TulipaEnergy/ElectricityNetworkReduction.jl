@@ -18,7 +18,7 @@ function calculate_ttc_from_ptdfs(
         limiting_line_to = Int[],
     )
 
-    # We only process transactions where 'transaction_from' < 'transaction_to'
+    # TTC is symmetric (DC assumption): TTC(a→b) = TTC(b→a), so only compute canonical pairs (a < b)
     canonical_ptdf_df = filter(row -> row.transaction_from < row.transaction_to, ptdf_df)
     grouped_transactions = groupby(canonical_ptdf_df, [:transaction_from, :transaction_to])
 

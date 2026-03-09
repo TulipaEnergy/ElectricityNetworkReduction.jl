@@ -24,6 +24,9 @@ These functions handle the initial stage of reading input data from Excel or CSV
 - **`process_tielines(tielines_df)`**
   Processes inter-zonal transmission lines to ensure consistent representation of connections across zone boundaries.
 
+- **`rename_buses(nodes_df, lines_df, tielines_df)`**
+  Assigns sequential integer IDs to all buses and returns updated data frames alongside a mapping from original to new IDs. Used internally to normalise bus identifiers before matrix construction.
+
 - **`convert_line_to_pu!(df, baseMVA)`**
   Converts line parameters from physical units (Ohms) to per-unit values using Voltage (kV) and Current (A), if required.
   This function modifies the data frame in place.
@@ -49,8 +52,10 @@ These functions construct the mathematical representation of the electrical netw
 
 These functions implement the core algorithms used to reduce the size of the network while preserving its physical behavior.
 
-- **`select_representative_nodes(nodes_df, zone)`**
-  Identifies boundary or representative nodes within each zone based on interconnection degree and network topology.
+- **`select_representative_nodes(ybus, node_info, numbered_lines, numbered_tielines)`**
+  Identifies representative nodes within each zone. Supports two modes controlled by `CONFIG.rep_node_mode`:
+  - `"auto"`: selects the top `CONFIG.rep_node_k_per_zone` nodes per zone ranked by interconnection degree (line capacity as tiebreaker).
+  - `"manual_excel"`: reads the `IsRepresentative` column from the `Nodes` sheet.
 
 - **`kron_reduce_ybus(ybus, representative_nodes)`**
   Applies Kron reduction to eliminate internal nodes while preserving sensitivity relationships between representative nodes.
@@ -71,13 +76,25 @@ These functions use mathematical programming to determine synthetic line capacit
 These functions and objects control the full end-to-end execution of the model.
 
 - **`main_full_analysis(input_dir, output_dir)`**
-  High-level wrapper that executes the complete network reduction pipeline, from data loading to result export.
+  High-level wrapper that executes the complete network reduction pipeline, from data loading to result export. Returns `nothing`; all results are written to CSV files in `output_dir`.
 
 - **`CONFIG`**
-  Global configuration object containing parameters such as `optimization_type`, `lambda`, `ptdf_epsilon`, base power, and unit settings.
+  Global configuration object. Key parameters: `optimization_type`, `lambda`, `ptdf_epsilon`, `base`, `bus_names_as_int`, `in_pu`, `allow_virtual_lines`, `rep_node_mode`, `rep_node_k_per_zone`, `enable_plots`. See the Model Usage guide for details.
 
 - **`reset_config!()`**
-  Resets all configuration parameters to their default values.
+  Resets all configuration parameters to their default values. Always call this between case studies in batch runs.
+
+---
+
+## 6. Visualisation (optional)
+
+Network plots are generated when `CONFIG.enable_plots = true`. The plotting functions use `Plots` and `GraphRecipes`, which are regular dependencies installed with the package.
+
+- **`plot_network(g, node_info, lines_df; title, n_size, f_size, show_names)`**
+  Plots a single network. Nodes are coloured by connected component (island). Uses `Latitude`/`Longitude` columns for geo-layout if present in the `Nodes` sheet, otherwise uses a spring layout.
+
+- **`plot_original_vs_reduced(g_orig, nodes_orig, lines_orig, g_red, nodes_red, lines_red, output_path)`**
+  Produces a side-by-side 1400×700 px comparison plot of the original and reduced networks, saved to `output_path`.
 
 ---
 
@@ -90,10 +107,12 @@ The package follows a modular architecture, with each file responsible for a spe
 | `config.jl` | Centralized settings and global constants |
 | `data-loading.jl` | Excel/CSV ingestion and per-unit normalization |
 | `export-functions.jl` | CSV export and reporting utilities |
+| `island-detection.jl` | Connected-component detection (used when `enable_plots = true`) |
 | `kron-reduction.jl` | Mathematical node elimination |
 | `main-analysis.jl` | The top-level wrapper executing the full pipeline |
-| `optimization.jl` | JuMP models for LP, QP, and MILP formulations [cite: 11] |
+| `network-visualisation.jl` | Network plot functions (only called when `enable_plots = true`) |
+| `optimization.jl` | JuMP models for LP, QP, and MILP formulations |
 | `ptdf-calculations.jl` | DC power flow sensitivity analysis |
-| `representative-nodes.jl` | Groups buses and identifies the "boundary" nodes to keep based on their connectivity degree |
-| `ttc-calculations.jl` | Transfer capacity evaluation [cite: 10] |
+| `representative-nodes.jl` | Groups buses and identifies boundary nodes per zone |
+| `ttc-calculations.jl` | Transfer capacity evaluation |
 | `ybus-formation.jl` | Physical matrix assembly ($Y_{bus}$) |

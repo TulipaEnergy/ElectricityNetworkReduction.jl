@@ -87,15 +87,15 @@ $$\max \sum_{t \in \mathcal{T}} TTC_t^{eq}$$
 2. **Physical Limit:**
    $$TTC_t^{eq} \cdot |PTDF_{t,l}| \le C_l^{eq} \quad \forall t, \forall l$$
 
-## 5.3 MIQP (Original Mixed-Integer Quadratic Programming)
+## 5.3 MIQP (Mixed-Integer Quadratic Programming)
 
 This formulation is used when we want to identify which synthetic line is **binding** (limiting) for each transaction.
 
 ### Decision Variables
 
 * Synthetic line capacities: $C_l^{eq} \ge 0$
-* Equivalent TTC values: $TTC_t^{eq} \ge 0$:
-* Binding indicator: ($z_{t,l} = 1$ means line $l$ limits transaction $t$) $z_{t,l} \in \{0,1\}$: b
+* Equivalent TTC values: $TTC_t^{eq} \ge 0$
+* Binding indicator: $z_{t,l} \in \{0,1\}$ ($z_{t,l} = 1$ means line $l$ limits transaction $t$)
 
 ### Objective
 
@@ -161,5 +161,5 @@ $$TTC_t^{eq} \le M_{TTC}\qquad \forall t$$
 ## Important Implementation Notes
 
 1. **PTDF Epsilon:** The optimization ignores lines where $|PTDF| < \epsilon$ (defined in `config.jl`) to avoid numerical instability (division by zero).
-2. **MW Conversion:** While the optimization typically occurs in per-unit (p.u.), the `main-analysis.jl` script converts final $C_l^{eq}$ results to MW using the `Sbase` defined in `CONFIG`.
+2. **MW Conversion:** While the optimization occurs in per-unit (p.u.), `main-analysis.jl` converts final $C_l^{eq}$ results to MW using the system base `CONFIG.base`.
 3. **Regularization ($\lambda$):** The $\lambda$ parameter is crucial. Without it, the solver may assign infinitely high capacities to lines that don't participate in any binding constraints. A small $\lambda$ (e.g., $10^{-6}$) ensures the smallest sufficient capacity is chosen.

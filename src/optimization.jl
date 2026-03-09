@@ -77,9 +77,6 @@ function optimize_equivalent_capacities(
     synth_lines_df = unique(ptdf_reduced_results, [:synth_line_from, :synth_line_to])
 
     println("Candidate synthetic lines BEFORE any filtering: $(nrow(synth_lines_df))")
-    #for row in eachrow(synth_lines_df)
-    #    println("  $(row.synth_line_from) → $(row.synth_line_to)")
-    #end
 
     # ── Save the original unfiltered candidates for possible fallback ──
     original_candidates = copy(synth_lines_df)

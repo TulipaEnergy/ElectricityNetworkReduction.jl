@@ -13,7 +13,6 @@ using Ipopt
 using Graphs
 using GraphRecipes
 using Plots
-using Random
 
 export load_excel_data,
     clean_line_data,
