@@ -57,12 +57,16 @@ This enables fast, accurate, and scalable power system studies.
 
 ## Workflow at a glance
 
-1. **Load and clean data** – Read the raw data, remove invalid entries, assign consistent IDs, and convert everything to per-unit values.
-2. **Analyse the original grid** – Build the Y-bus, compute PTDF matrices for canonical transactions, and derive TTC limits using the original line capacities.
-3. **Select representative nodes** – Group buses by zone/area, then keep the nodes with the highest interconnection degree to serve as the reduced network boundary.
-4. **Kron reduction and reduced PTDFs** – Eliminate non-representative nodes while preserving admittance relationships, and recompute PTDFs on the reduced system.
-5. **Optimize equivalent capacities** – Solve a linear/quadratic/or linearized MIQP program (via JuMP+HiGHS/Ipopt) to find synthetic line capacities that reproduce the canonical TTC limits within tolerance.
-6. **Compare and export** – Generate CSV reports (bus maps, TTC comparison, PTDF results, equivalent capacities) so you can inspect or downstream the reduced model.
+1. **Load and clean data** — Read the raw data, remove invalid entries, assign consistent sequential IDs, and convert line parameters to per-unit values.
+2. **Build the admittance matrix** — Assemble the full-network $Y_{bus}$ from line resistance, reactance, and shunt susceptance.
+3. **Compute PTDFs for the original network** — Calculate Power Transfer Distribution Factors for all canonical inter-zonal transactions.
+4. **Detect islands** *(optional, when `enable_plots = true`)* — Find connected components and label nodes for visualisation colouring.
+5. **Select representative nodes** — Group buses by zone, then keep the highest-degree nodes to serve as the reduced network boundary (automatically by degree, or manually from Excel).
+6. **Apply Kron reduction** — Eliminate non-representative nodes while preserving admittance relationships, producing synthetic lines between representative nodes.
+7. **Filter virtual lines** *(when `allow_virtual_lines = false`)* — Remove synthetic lines between zones with no direct physical connection in the original network.
+8. **Compute PTDFs for the reduced network** — Repeat the PTDF calculation on the reduced topology.
+9. **Optimise equivalent line capacities** — Solve a QP, LP, or MILP program (via JuMP + Ipopt/HiGHS) to find synthetic line thermal limits that reproduce the original inter-zonal TTCs.
+10. **Export results** — Write CSV reports (bus maps, TTC comparison, PTDF results, equivalent capacities) for downstream use.
 
 ---
 

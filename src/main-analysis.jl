@@ -1,34 +1,34 @@
 # --- MAIN ANALYSIS WORKFLOW ---
 
 """
-    main_full_analysis()
+    main_full_analysis(input_data_dir, output_data_dir)
 
 Complete network reduction analysis workflow including:
 1. Data loading and preprocessing
-2. Original network PTDF/TTC analysis
-3. Representative node selection
-4. Kron reduction
-5. Reduced network analysis
-6. Optimization of equivalent capacities
-7. Results comparison and export
+2. Island detection (optional, when `CONFIG.enable_plots = true`)
+3. Original network Y-bus and TTC/PTDF analysis
+4. Representative node selection
+5. Kron reduction
+6. Virtual line filtering (when `CONFIG.allow_virtual_lines = false`)
+7. Reduced network PTDF analysis
+8. Optimization of equivalent capacities
+9. Results comparison and export
 
 # Returns
-Tuple containing:
-- ttc_results: Original network TTC calculations
-- ptdf_reduced_results: Reduced network PTDF calculations
-- equivalent_capacities_df: Optimized equivalent capacities
-
-# Data Directory
-Modify the input_data_dir and output_data_dir variables to change the location.
+Nothing. All results are written to CSV files in `output_data_dir`.
 
 # Output Files
-- Bus_ID_Map_QP.csv: Mapping of bus names to numerical IDs
-- Line_Details_QP.csv: Comprehensive line information
-- Representative_Nodes_QP.csv: Selected representative nodes
-- TTC_Original_Network_QP.csv: Original network TTC values
-- PTDF_Reduced_Network_QP.csv: Reduced network PTDF values
-- Equivalent_Capacities_QP.csv: Optimized synthetic line capacities
-- TTC_Comparison_QP.csv: Comparison of original vs equivalent TTC values
+All filenames use `CONFIG.suffix` as a postfix:
+- `Bus_ID_Map_<suffix>.csv`: Mapping of original bus names to sequential integer IDs
+- `Line_Details_<suffix>.csv`: Comprehensive line information
+- `Representative_Nodes_<suffix>.csv`: Selected representative nodes per zone
+- `TTC_Original_Network_<suffix>.csv`: Original network TTC values
+- `PTDF_Reduced_Network_<suffix>.csv`: Reduced network PTDF values
+- `Equivalent_Capacities_<suffix>.csv`: Optimized synthetic line capacities and reactances
+- `TTC_Comparison_<suffix>.csv`: Comparison of original vs equivalent TTC values
+- `Network_Original_<suffix>.png`: Original network plot (only when `enable_plots = true`)
+- `Network_Reduced_<suffix>.png`: Reduced network plot (only when `enable_plots = true`)
+- `Network_Original_vs_Reduced_<suffix>.png`: Side-by-side comparison plot (only when `enable_plots = true`)
 """
 function main_full_analysis(input_data_dir::String, output_data_dir::String)
     println("="^50)
@@ -52,14 +52,18 @@ function main_full_analysis(input_data_dir::String, output_data_dir::String)
         tie_lines,
         CONFIG.base,
     )
-    # --- 1: Island Detection & Original Plot ---
-    components, node_info, g_orig =
-        detect_islands(numbered_lines, numbered_tielines, node_info)
-
-    all_orig_lines = vcat(numbered_lines, numbered_tielines, cols = :union)
-
-    # Just create the plot object (do not display)
-    plt_orig = plot_network(g_orig, node_info, all_orig_lines; title = "Original Network")
+    # --- Island Detection & Original Plot ---
+    if CONFIG.enable_plots
+        components, node_info, g_orig =
+            detect_islands(numbered_lines, numbered_tielines, node_info)
+        all_orig_lines_plot = vcat(numbered_lines, numbered_tielines, cols = :union)
+        plt_orig =
+            plot_network(g_orig, node_info, all_orig_lines_plot; title = "Original Network")
+        savefig(
+            plt_orig,
+            joinpath(output_data_dir, "Network_Original_$(CONFIG.suffix).png"),
+        )
+    end
 
     # Y-bus
     Ybus_original =
@@ -168,43 +172,41 @@ function main_full_analysis(input_data_dir::String, output_data_dir::String)
     end
 
     # --- Reduced Network Plot ---
-
-    if !isnothing(equivalent_capacities_df)
+    if CONFIG.enable_plots && !isnothing(equivalent_capacities_df)
         # 1. Create mapping for representative nodes
-        rep_id_to_local = Dict(id => i for (i, id) in enumerate(rep_node_ids))
-
+        rep_id_to_local_plot = Dict(id => i for (i, id) in enumerate(rep_node_ids))
         # 2. Build graph using synthetic properties
         g_reduced = SimpleGraph(length(rep_node_ids))
         for row in eachrow(equivalent_capacities_df)
-            u = rep_id_to_local[row.synth_line_from]
-            v = rep_id_to_local[row.synth_line_to]
+            u = rep_id_to_local_plot[row.synth_line_from]
+            v = rep_id_to_local_plot[row.synth_line_to]
             add_edge!(g_reduced, u, v)
         end
-
         # 3. Plot reduced network using only synth properties
         rep_node_info = filter(row -> row.new_id in rep_node_ids, node_info)
-        plt_red = plot_network(
+
+        plt_reduced = plot_network(
             g_reduced,
             rep_node_info,
             equivalent_capacities_df;
             title = "Reduced Network",
         )
+        savefig(
+            plt_reduced,
+            joinpath(output_data_dir, "Network_Reduced_$(CONFIG.suffix).png"),
+        )
+
+        # --- Side-by-side visualization: Original vs Reduced ---
+        plot_original_vs_reduced(
+            g_orig,
+            node_info,
+            all_orig_lines_plot,
+            g_reduced,
+            rep_node_info,
+            equivalent_capacities_df,
+            joinpath(output_data_dir, "Network_Original_vs_Reduced_$(CONFIG.suffix).png"),
+        )
     end
-
-    # --- Side-by-side visualization: Original vs Reduced ---
-    plt_comparison = plot_original_vs_reduced(
-        g_orig,
-        node_info,
-        all_orig_lines,
-        g_reduced,
-        rep_node_info,
-        equivalent_capacities_df,
-    )
-
-    savefig(
-        plt_comparison,
-        joinpath(output_data_dir, "Network_Original_vs_Reduced_$(CONFIG.suffix).png"),
-    )
 
     # Filter original TTCs to only include canonical RN-to-RN transactions for comparison
     rn_orig_ids = unique(
@@ -275,7 +277,7 @@ function main_full_analysis(input_data_dir::String, output_data_dir::String)
 
         println("\n")
         println("FINAL TTC COMPARISON (Canonical RN-to-RN Transactions)")
-        println("All values in MW on 100 MVA base")
+        println("All values in MW on $(CONFIG.base) MVA base")
         println("\n")
         println(final_comparison)
 
@@ -351,14 +353,7 @@ function main_full_analysis(input_data_dir::String, output_data_dir::String)
         println("Equivalent capacities exported to: $output_path_eq_cap")
     end
 
-    println("\nALL DATA EXPORTED IN MW (100 MVA BASE).")
+    println("\nALL DATA EXPORTED IN MW ($(CONFIG.base) MVA BASE).")
 
-    return
-    ttc_results,
-    ptdf_reduced_results,
-    equivalent_capacities_df,
-    ttc_equivalent,
-    components,
-    node_info,
-    plt_comparison
+    return nothing
 end

@@ -21,10 +21,10 @@ Base.@kwdef mutable struct Config
 
     # Numerical parameters
     base::Float64 = 100.0               # MVA base for per-unit conversion
-    optimization_type::String = "MIQP"    # "MIQP", "QP", or "LP"
+    optimization_type::String = "QP"      # "QP", "LP", or "MIQP"
     lambda::Float64 = 1e-6              # Regularization parameter
     ptdf_epsilon::Float64 = 1e-6        # PTDF zero threshold
-    suffix::String = "MIQP"               # Suffix for output files
+    suffix::String = "QP"                 # Suffix for output files
 
     # Representative node selection
     rep_node_mode::String = "auto"      # "auto" or "manual_excel"
@@ -34,6 +34,11 @@ Base.@kwdef mutable struct Config
 
     # Used in both modes for degree calculation
     rep_node_degree_threshold::Float64 = 1e-8
+
+    # Visualisation — off by default. Set to true to generate a side-by-side PNG plot
+    # of the original and reduced networks. Requires Plots and GraphRecipes (installed
+    # automatically with the package).
+    enable_plots::Bool = false
 
 end
 
