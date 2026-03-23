@@ -30,7 +30,7 @@ The `ElectricityNetworkReduction` module requires several key libraries for opti
 
 ```julia
 using Pkg
-Pkg.add(url="https://github.com/TulipaEnergy/ElectricityNetworkReduction.jl.git")
+Pkg.add("ElectricityNetworkReduction")
 Pkg.instantiate()
 ```
 
