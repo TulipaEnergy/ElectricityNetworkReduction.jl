@@ -1,7 +1,7 @@
 name = "ElectricityNetworkReduction"
 uuid = "8d6c9889-004b-5ffc-a588-babdd84958c6"
-authors = ["Germán Morales-España <german.morales@tno.nl>", " Juan Giraldo Chavarriaga <juan.giraldo@tno.nl>", " Muhammad Numan <muhammad.numan@ucd.ie>", " Ni Wang <ni.wang@tno.nl>"]
 version = "0.1.0"
+authors = ["Germán Morales-España <german.morales@tno.nl>", " Juan Giraldo Chavarriaga <juan.giraldo@tno.nl>", " Muhammad Numan <muhammad.numan@ucd.ie>", " Ni Wang <ni.wang@tno.nl>"]
 
 [deps]
 CSV = "336ed68f-0bac-5ca0-87d4-7b16caf5d00b"
@@ -29,7 +29,7 @@ JuMP = "1"
 MathOptInterface = "1"
 Plots = "1"
 Statistics = "1"
-XLSX = "0.10"
+XLSX = "0.10, 0.11"
 julia = "1.10"
 
 [extras]
