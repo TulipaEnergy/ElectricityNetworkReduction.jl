@@ -23,6 +23,10 @@ on:
         required: false
         type: boolean
         default: false
+      run_slow_tests:
+        required: false
+        type: boolean
+        default: false
     secrets:
       codecov_token:
         required: true
@@ -43,6 +47,8 @@ jobs:
         uses: julia-actions/cache@v3
       - uses: julia-actions/julia-buildpkg@v1
       - uses: julia-actions/julia-runtest@v1
+        env:
+          NETWORKREDUCTION_RUN_SLOW_TESTS: ${{ inputs.run_slow_tests }}
       - uses: julia-actions/julia-processcoverage@v1
         if: ${{ inputs.run_codecov }}
       - uses: codecov/codecov-action@v5

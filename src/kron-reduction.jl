@@ -51,20 +51,34 @@ function kron_reduce_ybus(Ybus::SparseMatrixCSC{ComplexF64}, rep_node_ids::Vecto
     M = Ybus_permuted[N_R+1:end, N_R+1:end]
 
     M_dense = Matrix(M)
+    L_dense = Matrix(L)
 
-    M_inv = try
-        inv(M_dense)
+    # For multi-island networks the AC Y-bus has one zero eigenvalue per island,
+    # making M singular. A small shunt regularisation (ε·I) is the standard
+    # power-systems technique: it is equivalent to adding a tiny conductance to
+    # ground at every eliminated bus, negligibly affecting the electrical solution
+    # while making M numerically invertible. This is faster and more accurate
+    # than the Moore-Penrose pseudoinverse (which requires a full SVD).
+    #
+    # M_inv * L is obtained via a direct solve (M \ L) rather than forming the
+    # explicit inverse: mathematically equivalent, but noticeably more stable
+    # and avoids materialising a dense N_E×N_E inverse just to multiply it away.
+    X = try
+        M_dense \ L_dense
     catch e
         if isa(e, SingularException)
-            @warn "Submatrix M for Kron reduction is singular, using pseudoinverse (pinv)."
-            pinv(M_dense)
+            n_elim = size(M_dense, 1)
+            ε = 1e-8
+            @warn "Submatrix M is singular (multi-island network with $(n_elim) " *
+                  "eliminated buses). Applying shunt regularisation ε=$(ε) before solving."
+            (M_dense + ε * I(n_elim)) \ L_dense
         else
             rethrow(e)
         end
     end
 
-    # Y_kron = K - L_T * M_inv * L
-    Y_kron_dense = Matrix(K) - L_T * M_inv * L
+    # Y_kron = K - L_T * (M \ L)
+    Y_kron_dense = Matrix(K) - L_T * X
     Y_kron = sparse(Y_kron_dense)
 
     println("\nKron reduction complete: Original $(N) buses -> Reduced $(N_R) buses.")

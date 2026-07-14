@@ -11,7 +11,7 @@
 [![All Contributors](https://img.shields.io/github/all-contributors/TulipaEnergy/ElectricityNetworkReduction.jl?labelColor=5e1ec7&color=c0ffee&style=flat-square)](#contributors)
 [![BestieTemplate](https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/JuliaBesties/BestieTemplate.jl/main/docs/src/assets/badge.json)](https://github.com/JuliaBesties/BestieTemplate.jl)
 
-**ElectricityNetworkReduction.jl** is a Julia package for **power system network reduction** based on **PTDF-preserving Kron reduction** and **optimization-based equivalent capacity estimation**.
+**ElectricityNetworkReduction.jl** is a Julia package for **power system network reduction** based on **PTDF-preserving Kron reduction** and **optimisation-based equivalent capacity estimation**.
 
 It is a package for simplifying detailed electrical networks into compact equivalents without losing the transfer characteristics. Starting from raw data, it selects representative nodes, performs Kron reduction, and optimizes synthetic line capacities.
 

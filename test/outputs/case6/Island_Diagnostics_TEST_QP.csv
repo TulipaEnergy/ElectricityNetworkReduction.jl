@@ -1,0 +1,2 @@
+island_id,rank,n_buses,zones,voltage_kv,dc_bridge,diagnosis,suspect_zones
+1,1,6,1(2);2(2);3(2),230.0,false,REAL,

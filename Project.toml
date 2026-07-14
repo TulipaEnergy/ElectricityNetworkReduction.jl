@@ -5,7 +5,9 @@ version = "0.1.0"
 
 [deps]
 CSV = "336ed68f-0bac-5ca0-87d4-7b16caf5d00b"
+CairoMakie = "13f3f980-e62b-5c42-98c6-ff1f3baf88f0"
 DataFrames = "a93c6f00-e57d-5684-b7b6-d8193f3e46c0"
+GraphMakie = "1ecd5474-83a3-4783-bb4f-06765db800d2"
 GraphRecipes = "bd48cda9-67a9-57be-86fa-5b3c104eda73"
 Graphs = "86223c79-3864-5bf0-83f7-82e725a168b6"
 HiGHS = "87dc4568-4c63-4d18-b0c0-bb2238e4078b"
@@ -20,7 +22,9 @@ XLSX = "fdbf4ff8-1666-58a4-91e7-1b58723a45e0"
 
 [compat]
 CSV = "0.10"
+CairoMakie = "0.12 - 0.15"
 DataFrames = "1"
+GraphMakie = "0.5 - 0.10"
 GraphRecipes = "0.5"
 Graphs = "1"
 HiGHS = "1"
@@ -31,9 +35,3 @@ Plots = "1"
 Statistics = "1"
 XLSX = "0.10"
 julia = "1.10"
-
-[extras]
-Test = "8dfed614-e22c-5e08-85e1-65c5234f0b40"
-
-[targets]
-test = ["Test"]

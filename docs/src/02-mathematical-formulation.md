@@ -1,165 +1,204 @@
 # Mathematical formulation
 
-This document presents the mathematical foundations of the **ElectricityNetworkReduction.jl** model.
-The objective of the model is to construct a reduced electrical network that preserves the
-power transfer characteristics of the original system while significantly reducing its size.
+This document summarises the mathematical foundations of
+**ElectricityNetworkReduction.jl**. The model builds a reduced electrical
+network that preserves transfer-capacity behaviour between representative
+nodes while greatly reducing network size.
 
 ---
 
-## 1. Network admittance matrix ($Y_{bus}$)
+## 1. Network admittance matrix
 
-The electrical network is represented by its nodal admittance matrix:
+The network is represented by its nodal admittance matrix:
 
 $$Y = G + jB$$
 
-In the DC power flow approximation, we focus on the **susceptance matrix** ($B$), assuming conductance ($G$) is negligible. Each transmission line between buses $i$ and $j$ is defined by its series admittance $y_{ij} = \frac{1}{R_{ij} + jX_{ij}}$. Including shunt susceptance $B_{ij}$, the $Y_{bus}$ is assembled as:
+Each AC branch between buses $i$ and $j$ has series admittance
+$y_{ij} = 1/(R_{ij} + jX_{ij})$. Line charging and bus shunts are included in
+the diagonal terms. Transformers are treated as AC elements and are merged into
+the line set before $Y_{bus}$ assembly.
 
-* **Diagonal elements ($Y_{ii}$):** Represent the sum of all admittances connected to bus $i$, including shunt susceptances:
-    $$Y_{ii} = \sum_{j \in \mathcal{N}(i)} \left( y_{ij} + j\frac{B_{ij}}{2} \right) + (G_{i}^{shunt} + jB_{i}^{shunt})$$
-* **Off-diagonal elements ($Y_{ij}$):** Represent the negative of the admittance between buses $i$ and $j$:
-    $$Y_{ij} = -y_{ij}$$
-
----
-
-## 2. DC Power Flow and PTDFs
-
-Under the DC approximation (negligible resistance, flat voltage magnitudes, small angles), active power flow is:
-
-$$P = B \theta$$
-
-### Power Transfer Distribution Factors (PTDF)
-
-The PTDF for a line $l$ (from bus $i$ to $j$) during a transaction between buses $a$ and $b$ is:
-
-$$PTDF_{l}^{a \to b} = b_{ij} (\theta_i^{a \to b} - \theta_j^{a \to b})$$
-
-In the code, this is solved by calculating the sensitivity of bus angles to injections at buses $a$ and $b$ relative to a slack bus.
+DC interconnectors are excluded from $Y_{bus}$. Their capacity contributes
+additively to TTC after the AC reduction is complete.
 
 ---
 
-## 3. Total Transfer Capacity (TTC)
+## 2. PTDFs
 
-The TTC for a transaction $t$ (from $a$ to $b$) is the maximum power flow possible before any line hits its thermal limit $C_l$:
+Under the DC approximation, active power flow is:
 
-$$TTC_{t} = \min_{l \in \text{Lines}} \left( \frac{C_l}{|PTDF_{t,l}|} \right)$$
+$$P = B\theta$$
 
----
+For a transaction from bus $a$ to bus $b$, the PTDF on line $l=(i,j)$ is:
 
-## 4. Network Reduction (Kron)
+$$PTDF_l^{a \to b} = b_{ij}(\theta_i^{a \to b} - \theta_j^{a \to b})$$
 
-To reduce the system size, the network nodes are partitioned into **Representative Nodes (R)**, which are kept, and **Eliminated Nodes (E)**, which are removed:
-
-$$Y = \begin{bmatrix} Y_{RR} & Y_{RE} \\ Y_{ER} & Y_{EE} \end{bmatrix}$$
-
-Using the **Kron Reduction** method, we derive a reduced admittance matrix $Y_{reduced}$ that maintains the exact electrical behavior seen from the representative nodes:
-
-$$Y_{reduced} = Y_{RR} - Y_{RE} Y_{EE}^{-1} Y_{ER}$$
+For multi-island AC networks, one reference bus is chosen per AC component.
+Transactions between different AC islands have $TTC_{AC} = \infty$.
 
 ---
 
-## 5. Optimization of Equivalent Capacities
+## 3. Original-network TTC
 
-The package identifies synthetic capacities $C_l^{eq}$ for the reduced network to match the original $TTC^{orig}$. Based on `optimization.jl`, three methods are available:
+For transaction $t$, the AC transfer capacity is:
 
-## 5.1 Quadratic Programming (QP)
+$$TTC_{AC,t} = \min_l \frac{C_l}{|PTDF_{t,l}|}$$
 
-**Objective:** Minimize the squared error between original and equivalent TTC, with a regularization term to keep capacities realistic.
+Lines with $|PTDF| < \varepsilon$ are ignored, where $\varepsilon$ is
+`CONFIG.ptdf_epsilon`.
 
-$$\min \sum_{t \in \mathcal{T}} (TTC_t^{eq} - TTC_t^{orig})^2 + \lambda \sum_{l \in \mathcal{L}_{red}} (C_l^{eq})^2$$
+DC interconnectors are additive:
 
-**Constraints:**
+$$TTC_t = TTC_{AC,t} + C_{DC,t}$$
 
-1. **Flow Limit:** For every transaction $t$ and every synthetic line $l$:
-   $$TTC_t^{eq} \cdot |PTDF_{t,l}| \le C_l^{eq} \quad \forall t, \forall l$$
-2. **Non-negativity:**
-   $$C_l^{eq} \ge 0, \quad TTC_t^{eq} \ge 0$$
+For cross-island transactions:
 
-## 5.2 Linear Programming (LP)
+$$TTC_t =
+\begin{cases}
+C_{DC,t}, & \text{if a DC bridge exists} \\
+\infty, & \text{otherwise}
+\end{cases}
+$$
 
-**Objective:** Maximize the total transfer capacity of the reduced network while ensuring it never exceeds the original limits.
+---
 
-$$\max \sum_{t \in \mathcal{T}} TTC_t^{eq}$$
+## 4. Kron reduction
 
-**Constraints:**
+Representative nodes are retained and all other nodes are eliminated:
 
-1. **Upper Bound:**
-   $$TTC_t^{eq} \le TTC_t^{orig} \quad \forall t$$
-2. **Physical Limit:**
-   $$TTC_t^{eq} \cdot |PTDF_{t,l}| \le C_l^{eq} \quad \forall t, \forall l$$
+$$Y =
+\begin{bmatrix}
+Y_{RR} & Y_{RE} \\
+Y_{ER} & Y_{EE}
+\end{bmatrix}
+$$
 
-## 5.3 MIQP (Mixed-Integer Quadratic Programming)
+The reduced admittance matrix is:
 
-This formulation is used when we want to identify which synthetic line is **binding** (limiting) for each transaction.
+$$Y_{red} = Y_{RR} - Y_{RE}Y_{EE}^{-1}Y_{ER}$$
 
-### Decision Variables
+In multi-island cases, a small diagonal regularisation is used when needed:
 
-* Synthetic line capacities: $C_l^{eq} \ge 0$
-* Equivalent TTC values: $TTC_t^{eq} \ge 0$
-* Binding indicator: $z_{t,l} \in \{0,1\}$ ($z_{t,l} = 1$ means line $l$ limits transaction $t$)
+$$Y_{EE}^{-1} \approx (Y_{EE} + \epsilon I)^{-1}$$
 
-### Objective
+The implementation uses a direct linear solve instead of forming an explicit
+inverse.
 
-$$\min \sum_{t\in\mathcal{T}} (TTC_t^{eq}-TTC_t^{orig})^2 + \lambda\sum_{l\in\mathcal{L}} (C_l^{eq})^2$$
+---
 
-### Constraints
+## 5. Equivalent capacity fitting
 
-1. **General physical TTC upper bound:**
-   $$TTC_t^{eq} \le \frac{C_l^{eq}}{|PTDF_{t,l}|}\qquad \forall t,l$$
+The model identifies synthetic AC capacities $C_l^{eq}$ for the reduced
+network. DC capacities remain outside the AC equivalent and are added
+additively to total TTC.
 
-2. **Exactly one binding line per transaction:**
-   $$\sum_{l\in\mathcal{L}} z_{t,l} = 1 \qquad \forall t$$
+High-resolution zone mode fixes synthetic lines between two retained high-res
+buses to their original physical capacity. Other synthetic capacities are
+optimised or constructed according to `CONFIG.optimisation_type`.
 
-3. **Big-M binding constraint (enforcing equality on chosen line):**
-   $$\frac{C_l^{eq}}{|PTDF_{t,l}|} - TTC_t^{eq} \le M(1-z_{t,l}) \qquad \forall t,l$$
+### 5.1 Optimisation modes
 
-## 5.4 Linearized MIQP → MILP
+`CONFIG.optimisation_type` controls how the synthetic AC capacities are
+obtained:
 
-To make the MIQP practical for large networks, the implementation uses a **linearized MILP** solved by **HiGHS**.
+| Type | Main purpose |
+| :--- | :--- |
+| `QP` | Fast continuous capacity fitting. Use it when you want a practical balance between TTC accuracy and computation time. |
+| `LP` | Deterministic capacity-envelope construction. Use it when you want a solver-light capacity set based directly on PTDF envelopes. |
+| `MIQP` | Binding-line formulation. Use it when identifying the limiting synthetic line and obtaining physically consistent capacities is more important than speed. |
 
-### Decision Variables (MILP)
+In all modes, DC capacity remains additive:
 
-* Synthetic line capacity: $C_l^{eq} \ge 0$
-* Equivalent TTC: $TTC_t^{eq} \ge 0$
-* Binding selection: $b_{t,l}\in\{0,1\}$
-* Allocated capacity for transaction $t$ on line $l$: $Z_{t,l}\ge 0$
-* absolute TTC error (L1 linearization): $V_t^{abs}\ge 0$
+$$TTC_t^{eq} = TTC_{AC,t}^{eq} + C_{DC,t}$$
 
-### Objective (L1 TTC matching)
+For cross-island transactions, the transfer limit is the DC bridge capacity
+when a bridge exists, or `Inf` otherwise.
 
-$$\min \sum_{t\in\mathcal{T}} V_t^{abs}$$
+### 5.2 QP
 
-**Linearization of absolute value:**
-$$V_t^{abs} \ge TTC_t^{eq}-TTC_t^{orig}, \qquad \forall t$$
-$$V_t^{abs} \ge TTC_t^{orig}-TTC_t^{eq}, \qquad \forall t$$
+QP minimises squared error against the original AC TTC component:
 
-### MILP Constraints
+$$
+\min \sum_t (TTC_{AC,t}^{eq} - TTC_{AC,t}^{orig})^2
+  + \lambda \sum_l (C_l^{eq})^2
+$$
 
-#### A) TTC definition using allocated capacity $Z$
+subject to:
 
-$$TTC_t^{eq} = \sum_{l\in\mathcal{L}_t} \frac{Z_{t,l}}{|PTDF_{t,l}|} \qquad \forall t$$
+$$TTC_{AC,t}^{eq}|PTDF_{t,l}| \le C_l^{eq} \quad \forall t,l$$
 
-#### B) Capacity allocation limits
+and non-negativity of capacities and equivalent AC TTCs. DC capacity is not
+used as an AC floor; it is added back only in reporting.
 
-$$Z_{t,l} \le C_l^{eq}\qquad \forall t,l$$
+### 5.3 LP
 
-#### C) Exactly one binding line per transaction
+LP mode uses a deterministic capacity envelope rather than an iterative Ipopt
+solve. For each synthetic line:
 
-$$\sum_{l\in\mathcal{L}_t} b_{t,l} = 1\qquad \forall t$$
+$$C_l^{eq} =
+\max_{t \in \mathcal{T}_l}
+\left(TTC_{AC,t}^{orig}|PTDF_{t,l}|\right)$$
 
-#### D) Big-M logic
+The resulting TTC follows the same thermal-limit relation,
+$\min_l C_l^{eq}/|PTDF_{t,l}|$. This is fast and deterministic. It guarantees
+support for the original AC target when no fixed physical capacity is lower
+than the envelope, but it can overestimate some transaction TTCs.
 
-* if $b_{t,l}=1$, then $Z_{t,l}=C_l^{eq}$
-* if $b_{t,l}=0$, then $Z_{t,l}=0$
+### 5.4 MIQP / MILP binding formulation
 
-$$Z_{t,l} \le M_Z\, b_{t,l}\qquad \forall t,l$$
-$$Z_{t,l} \ge C_l^{eq} - M_Z(1-b_{t,l})\qquad \forall t,l$$
+MIQP mode is implemented as a HiGHS MILP that selects a binding synthetic line
+for each transaction from a pruned candidate set.
 
-#### E) Numerical stability bounds
+Decision variables:
 
-$$TTC_t^{eq} \le M_{TTC}\qquad \forall t$$
+* $C_l^{eq} \ge 0$: synthetic capacities
+* $TTC_{AC,t}^{eq} \ge 0$: equivalent AC TTC
+* $z_{t,l} \in \{0,1\}$: binding-line indicator for candidate lines
+* $V_t^{abs} \ge 0$: absolute TTC error
 
-## Important Implementation Notes
+Objective:
 
-1. **PTDF Epsilon:** The optimization ignores lines where $|PTDF| < \epsilon$ (defined in `config.jl`) to avoid numerical instability (division by zero).
-2. **MW Conversion:** While the optimization occurs in per-unit (p.u.), `main-analysis.jl` converts final $C_l^{eq}$ results to MW using the system base `CONFIG.base`.
-3. **Regularization ($\lambda$):** The $\lambda$ parameter is crucial. Without it, the solver may assign infinitely high capacities to lines that don't participate in any binding constraints. A small $\lambda$ (e.g., $10^{-6}$) ensures the smallest sufficient capacity is chosen.
+$$
+\min \sum_t V_t^{abs} + \lambda\sum_l C_l^{eq}
+$$
+
+with:
+
+$$V_t^{abs} \ge TTC_{AC,t}^{eq} - TTC_{AC,t}^{orig}$$
+
+$$V_t^{abs} \ge TTC_{AC,t}^{orig} - TTC_{AC,t}^{eq}$$
+
+Physical upper-bound constraints:
+
+$$C_l^{eq} \ge TTC_{AC,t}^{eq}|PTDF_{t,l}| \quad \forall t,l$$
+
+Binding candidate selection:
+
+$$\sum_{l \in \mathcal{K}_t} z_{t,l} = 1$$
+
+where $\mathcal{K}_t$ is the pruned set of likely limiting lines for
+transaction $t$.
+
+Big-M binding logic:
+
+$$C_l^{eq} \le TTC_{AC,t}^{eq}|PTDF_{t,l}| + M_l(1-z_{t,l}) \quad \forall l \in \mathcal{K}_t$$
+
+Controls:
+
+* `CONFIG.miqp_binding_candidates_per_txn`
+* `CONFIG.miqp_time_limit_sec`
+* `CONFIG.miqp_mip_rel_gap`
+
+---
+
+## 6. Implementation notes
+
+1. `ptdf_epsilon` removes near-zero PTDF entries to avoid unstable divisions.
+2. Optimisation is performed in per-unit and exported in MW using `CONFIG.base`.
+3. Parallel AC circuits are aggregated consistently: admittances are summed in
+   $Y_{bus}$ and capacities are summed for TTC limits.
+4. `lambda` discourages unnecessarily large equivalent capacities.
+5. Equivalent reactance is back-computed from the Kron-reduced matrix as
+   $X^{eq} = 1 / \operatorname{Im}(Y_{kron,ij})$.
+6. DC lines are appended to `Equivalent_Capacities` with `is_dc = true` and
+   `X_pu = 0`.

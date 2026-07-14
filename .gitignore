@@ -2,6 +2,11 @@
 *.jl.cov
 *.jl.mem
 *.rej
+~$*.xlsx
+
+# Private / confidential case study data (not for public repo)
+test/inputs/case_EU/
+test/outputs/case_EU/
 .DS_Store
 .benchmarkci
 Manifest.toml

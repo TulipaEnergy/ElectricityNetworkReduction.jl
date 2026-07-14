@@ -11,7 +11,7 @@ DocMeta.setdocmeta!(
 makedocs(;
     modules = [ElectricityNetworkReduction],
     authors = "Germán Morales-España <german.morales@tno.nl>, Juan Giraldo Chavarriaga <juan.giraldo@tno.nl>, Muhammad Numan <muhammad.numan@ucd.ie>, Ni Wang <ni.wang@tno.nl>",
-    repo = "https://github.com/TulipaEnergy/ElectricityNetworkReduction.jl/blob/{commit}{path}#{line}",
+    repo = Documenter.Remotes.GitHub("TulipaEnergy", "ElectricityNetworkReduction.jl"),
     sitename = "ElectricityNetworkReduction.jl",
     format = Documenter.HTML(;
         canonical = "https://TulipaEnergy.github.io/ElectricityNetworkReduction.jl",
