@@ -1,0 +1,2 @@
+island_id,rank,n_buses,zones,voltage_kv,dc_bridge,diagnosis,suspect_zones
+1,1,39,Limburg(1);Mid_NL(8);North_Brabant(3);North_Holland(4);North_NL(14);South_Holland(7);Zeeland(2),138.0,false,REAL,
