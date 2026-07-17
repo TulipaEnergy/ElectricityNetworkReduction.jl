@@ -64,7 +64,6 @@ function load_excel_data(file_path::String)
         data["converters"] = _empty_converters_df()
     end
 
-    close(xf)
     return data
 end
 
