@@ -28,3 +28,15 @@ authors:
     email: ni.wang@tno.nl
     affiliation: TNO
     orcid: 'https://orcid.org/0000-0001-7037-7004'
+repository-code: "https://github.com/TulipaEnergy/ElectricityNetworkReduction.jl"
+abstract: >-
+    ElectricityNetworkReduction.jl is a Julia package
+    for power system network reduction based on
+    PTDF-preserving Kron reduction and
+    optimisation-based equivalent capacity estimation.
+keywords:
+    - Open source tool
+    - Electricity grid modelling and analysis
+    - Transmission network modelling
+    - Kron reduction
+license: Apache-2.0
