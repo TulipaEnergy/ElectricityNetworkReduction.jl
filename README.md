@@ -6,7 +6,7 @@
 [![Coverage](https://codecov.io/gh/TulipaEnergy/ElectricityNetworkReduction.jl/branch/main/graph/badge.svg)](https://codecov.io/gh/TulipaEnergy/ElectricityNetworkReduction.jl)
 [![Lint workflow Status](https://github.com/TulipaEnergy/ElectricityNetworkReduction.jl/actions/workflows/Lint.yml/badge.svg?branch=main)](https://github.com/TulipaEnergy/ElectricityNetworkReduction.jl/actions/workflows/Lint.yml?query=branch%3Amain)
 [![Docs workflow Status](https://github.com/TulipaEnergy/ElectricityNetworkReduction.jl/actions/workflows/Docs.yml/badge.svg?branch=main)](https://github.com/TulipaEnergy/ElectricityNetworkReduction.jl/actions/workflows/Docs.yml?query=branch%3Amain)
-[![DOI](https://zenodo.org/badge/DOI/10.5281/zenodo.19235749.svg)](https://doi.org/10.5281/zenodo.19235749)
+[![DOI](https://zenodo.org/badge/DOI/10.5281/zenodo.19235748.svg)](https://doi.org/10.5281/zenodo.19235748)
 [![Contributor Covenant](https://img.shields.io/badge/Contributor%20Covenant-2.1-4baaaa.svg)](CODE_OF_CONDUCT.md)
 [![All Contributors](https://img.shields.io/github/all-contributors/TulipaEnergy/ElectricityNetworkReduction.jl?labelColor=5e1ec7&color=c0ffee&style=flat-square)](#contributors)
 [![BestieTemplate](https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/JuliaBesties/BestieTemplate.jl/main/docs/src/assets/badge.json)](https://github.com/JuliaBesties/BestieTemplate.jl)
