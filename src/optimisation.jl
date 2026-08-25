@@ -177,13 +177,13 @@ function optimise_equivalent_capacities(
     ttc_canonical = filter(
         r ->
             (r.transaction_from in rn_ids) &&
-                (r.transaction_to in rn_ids) &&
-                (r.transaction_from < r.transaction_to) &&
-                !(
-                    !isempty(high_res_node_ids) &&
-                    (r.transaction_from in high_res_node_ids) &&
-                    (r.transaction_to in high_res_node_ids)
-                ),
+            (r.transaction_to in rn_ids) &&
+            (r.transaction_from < r.transaction_to) &&
+            !(
+                !isempty(high_res_node_ids) &&
+                (r.transaction_from in high_res_node_ids) &&
+                (r.transaction_to in high_res_node_ids)
+            ),
         ttc_original,
     )
 

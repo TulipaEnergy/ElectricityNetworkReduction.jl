@@ -291,7 +291,7 @@ function main_full_analysis(input_data_dir::String, output_data_dir::String)
         allowed_synth_pairs = Set{Tuple{Int,Int}}()
         n_rep = length(rep_node_ids)
         for i = 1:n_rep
-            for j = i+1:n_rep
+            for j = (i+1):n_rep
                 u, v = rep_node_ids[i], rep_node_ids[j]
                 zu, zv = id_to_zone[u], id_to_zone[v]
                 if zu == zv || (zu != zv && (min(zu, zv), max(zu, zv)) in zone_direct_pairs)
@@ -456,8 +456,8 @@ function main_full_analysis(input_data_dir::String, output_data_dir::String)
         ttc_rn_original = filter(
             row ->
                 (row.transaction_from in rn_orig_ids) &&
-                    (row.transaction_to in rn_orig_ids) &&
-                    (row.transaction_from < row.transaction_to),
+                (row.transaction_to in rn_orig_ids) &&
+                (row.transaction_from < row.transaction_to),
             ttc_results,
         )
 

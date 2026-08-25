@@ -46,9 +46,9 @@ function kron_reduce_ybus(Ybus::SparseMatrixCSC{ComplexF64}, rep_node_ids::Vecto
     Ybus_permuted = Ybus[perm, perm]
 
     K = Ybus_permuted[1:N_R, 1:N_R]
-    L = Ybus_permuted[N_R+1:end, 1:N_R]
-    L_T = Ybus_permuted[1:N_R, N_R+1:end]
-    M = Ybus_permuted[N_R+1:end, N_R+1:end]
+    L = Ybus_permuted[(N_R+1):end, 1:N_R]
+    L_T = Ybus_permuted[1:N_R, (N_R+1):end]
+    M = Ybus_permuted[(N_R+1):end, (N_R+1):end]
 
     M_dense = Matrix(M)
     L_dense = Matrix(L)

@@ -24,7 +24,7 @@ function _convex_hull_2d(pts::Vector{Point2f})
         end
         push!(upper, p)
     end
-    hull = vcat(lower[1:end-1], upper[1:end-1])
+    hull = vcat(lower[1:(end-1)], upper[1:(end-1)])
     return length(hull) ≥ 3 ? hull : pts
 end
 
