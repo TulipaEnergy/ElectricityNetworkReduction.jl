@@ -13,7 +13,7 @@
 
 **ElectricityNetworkReduction.jl** is a Julia package for **power system network reduction** based on **PTDF-preserving Kron reduction** and **optimisation-based equivalent capacity estimation**.
 
-It is a package for simplifying detailed electrical networks into compact equivalents without losing the transfer characteristics. Starting from raw data, it selects representative nodes, performs Kron reduction, and optimizes synthetic line capacities.
+It is a package for simplifying detailed electrical networks into compact equivalents while approximating selected transfer limits. Starting from raw data, it selects representative nodes, performs Kron reduction, and optimizes synthetic line capacities.
 
 ## How to Cite
 
@@ -26,6 +26,17 @@ pkg> add ElectricityNetworkReduction
 ```
 
 See the [documentation](https://tulipaenergy.github.io/ElectricityNetworkReduction.jl/dev/) for details on the model and the package.
+
+The `MIQP` option uses a conservative binding-line formulation that minimises
+squared relative TTC errors. SCIP is included as the open-source default.
+Any other MIQP-capable JuMP solver can be installed separately and selected by
+assigning its optimizer constructor to `CONFIG.miqp_optimizer`; see the
+[solver selection instructions](docs/src/03-model-usage.md#miqp-solver-selection).
+
+Network reduction is an approximation. Report TTC errors together with the
+reduction size, solver status and optimality gap; there is no universal TTC
+error requirement. The test suite checks that the exported equivalent network
+reproduces the reported TTCs.
 
 ## Contributing
 

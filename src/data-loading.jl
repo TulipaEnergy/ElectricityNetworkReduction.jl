@@ -398,8 +398,11 @@ Physical DC converter buses are remapped to a representative node in the same
 AC connected component whenever AC line data are provided. Intra-zone DC lines
 are skipped only when both endpoints are in the same AC component; intra-zone
 DC bridges between separate AC islands are kept. Multiple DC lines between the
-same representative-node pair are summed. This map is later used for additive
-TTC contribution and as a floor constraint in optimisation.
+same representative-node pair are summed. When `apply_converter_limits!` has
+annotated the lines, that sum is further capped, on each side of the pair, by
+the total rating of the distinct converters the lines use (a converter shared
+by two lines cannot carry both line ratings at once). This map is later used
+for the additive DC contribution to TTC.
 
 # Returns
 Dict{Tuple{Int,Int}, Float64}  keyed by (min_rep_id, max_rep_id)
@@ -447,6 +450,11 @@ function build_dc_capacity_map(
 
     dc_cap = Dict{Tuple{Int,Int},Float64}()
     skipped = 0
+
+    # Per pair and side (1 = min id, 2 = max id): ratings of the distinct
+    # converters used, or `nothing` once any line on that side has no converter.
+    has_conv = hasproperty(dclines_df, :From_converter)
+    side_convs = Dict{Tuple{Int,Int},Vector{Union{Nothing,Dict{String,Float64}}}}()
 
     for row in eachrow(dclines_df)
         zf = get(id_to_zone, row.From, nothing)
@@ -515,7 +523,40 @@ function build_dc_capacity_map(
 
         key = (min(rf, rt), max(rf, rt))
         dc_cap[key] = get(dc_cap, key, 0.0) + row.Capacity_pu
+
+        if has_conv
+            sides = get!(side_convs, key) do
+                Union{Nothing,Dict{String,Float64}}[
+                    Dict{String,Float64}(),
+                    Dict{String,Float64}(),
+                ]
+            end
+            ends = (
+                (row.From_converter, row.From_converter_pu),
+                (row.To_converter, row.To_converter_pu),
+            )
+            for (s, (name, cap)) in enumerate(rf < rt ? ends : reverse(ends))
+                isnothing(sides[s]) && continue
+                if name == "" || !isfinite(cap)
+                    sides[s] = nothing   # this side cannot be bounded by converters
+                else
+                    sides[s][name] = cap
+                end
+            end
+        end
     end
+
+    n_conv_capped = 0
+    for (key, sides) in side_convs
+        limit = minimum(isnothing(d) ? Inf : sum(values(d)) for d in sides)
+        if limit < dc_cap[key]
+            dc_cap[key] = limit
+            n_conv_capped += 1
+        end
+    end
+    n_conv_capped > 0 && println(
+        "DC capacity map: $(n_conv_capped) pair(s) capped by shared converter ratings.",
+    )
 
     println(
         "DC capacity map: $(length(dc_cap)) representative-node pairs" *
@@ -661,6 +702,68 @@ function build_converter_map(converters_df::DataFrame)::Dict{String,String}
 end
 
 """
+    apply_converter_limits!(dclines_df, converters_df, Sbase = CONFIG.base)
+
+Limit each DC line by the converter ratings at its terminals:
+`Capacity = min(line rating, converter at From, converter at To)`.
+Must run before `remap_dc_endpoints!`, while endpoints are still DC terminal
+names. Adds `From_converter`/`To_converter` (terminal name, `""` when there is
+no converter) and `From_converter_pu`/`To_converter_pu` (rating, `Inf` when
+unknown) so that `build_dc_capacity_map` can also cap several lines that share
+one converter. Updates `Capacity_MW` and `Capacity_pu` in place.
+"""
+function apply_converter_limits!(
+    dclines_df::DataFrame,
+    converters_df::DataFrame,
+    Sbase::Float64 = CONFIG.base,
+)
+    if isempty(dclines_df) ||
+       isempty(converters_df) ||
+       !hasproperty(converters_df, :Capacity_MW)
+        return dclines_df
+    end
+
+    clean = CONFIG.bus_names_as_int ? s -> string(s) : s -> uppercase(strip(string(s)))
+    conv_cap = Dict{String,Float64}()
+    for row in eachrow(converters_df)
+        ismissing(row.Capacity_MW) && continue
+        conv_cap[clean(row.From_node)] = Float64(row.Capacity_MW)
+    end
+
+    dclines_df[!, :Capacity_MW] = Float64.(dclines_df.Capacity_MW)
+    n = nrow(dclines_df)
+    from_conv, to_conv = fill("", n), fill("", n)
+    from_cap, to_cap = fill(Inf, n), fill(Inf, n)
+    n_limited = 0
+    for i = 1:n
+        fn = clean(dclines_df[i, :From_node])
+        tn = clean(dclines_df[i, :To_node])
+        if haskey(conv_cap, fn)
+            from_conv[i], from_cap[i] = fn, conv_cap[fn] / Sbase
+        end
+        if haskey(conv_cap, tn)
+            to_conv[i], to_cap[i] = tn, conv_cap[tn] / Sbase
+        end
+        limit = min(from_cap[i], to_cap[i]) * Sbase
+        if limit < dclines_df[i, :Capacity_MW]
+            dclines_df[i, :Capacity_MW] = limit
+            n_limited += 1
+        end
+    end
+
+    dclines_df[!, :Capacity_pu] = dclines_df.Capacity_MW ./ Sbase
+    dclines_df[!, :From_converter] = from_conv
+    dclines_df[!, :To_converter] = to_conv
+    dclines_df[!, :From_converter_pu] = from_cap
+    dclines_df[!, :To_converter_pu] = to_cap
+
+    println(
+        "Converter ratings applied: $(n_limited) of $(n) DC lines limited by a converter.",
+    )
+    return dclines_df
+end
+
+"""
     remap_dc_endpoints!(dclines_df, converter_map)
 
 Replace DC terminal bus names in DCLines with their connected AC substation
@@ -683,22 +786,26 @@ function remap_dc_endpoints!(dclines_df::DataFrame, converter_map::Dict{String,S
 
     # Apply the same name cleaning used by process_converters so that raw
     # Excel strings (lowercase, with spaces) match the uppercase map keys.
-    # Cleaned names are written back even when no remapping occurs so that
+    # Cleaned names are kept even when no remapping occurs so that
     # rename_dc_buses sees consistent strings throughout.
     clean = CONFIG.bus_names_as_int ? s -> string(s) : s -> uppercase(strip(string(s)))
+
+    # Store endpoints as cleaned strings up front: integer bus names are read
+    # from Excel as Int columns, which cannot hold the remapped String names.
+    dclines_df[!, :From_node] = String[clean(s) for s in dclines_df.From_node]
+    dclines_df[!, :To_node] = String[clean(s) for s in dclines_df.To_node]
 
     n_remapped = 0
     n_unchanged = 0
 
     for i = 1:nrow(dclines_df)
-        fn = clean(dclines_df[i, :From_node])
-        tn = clean(dclines_df[i, :To_node])
+        fn = dclines_df[i, :From_node]
+        tn = dclines_df[i, :To_node]
 
         if haskey(converter_map, fn)
             dclines_df[i, :From_node] = converter_map[fn]
             n_remapped += 1
         else
-            dclines_df[i, :From_node] = fn   # write back cleaned name
             n_unchanged += 1
         end
 
@@ -706,7 +813,6 @@ function remap_dc_endpoints!(dclines_df::DataFrame, converter_map::Dict{String,S
             dclines_df[i, :To_node] = converter_map[tn]
             n_remapped += 1
         else
-            dclines_df[i, :To_node] = tn     # write back cleaned name
             n_unchanged += 1
         end
     end

@@ -9,6 +9,7 @@ using Statistics
 using JuMP
 using MathOptInterface
 using HiGHS
+using SCIP
 using Ipopt
 using Graphs
 using GraphRecipes
@@ -24,16 +25,19 @@ export load_excel_data,
     process_converters,
     build_converter_map,
     remap_dc_endpoints!,
+    apply_converter_limits!,
     convert_line_to_pu!,
     rename_buses,
     rename_dc_buses,
     build_dc_capacity_map,
     form_ybus_with_shunt,
+    form_dc_ybus,
     calculate_single_injection_ptdfs,
     calculate_all_ttc_results,
     calculate_ptdfs_reduced,
     select_representative_nodes,
     kron_reduce_ybus,
+    filter_reduced_network,
     optimise_equivalent_capacities,
     export_bus_id_map,
     export_detailed_line_info,
