@@ -24,7 +24,7 @@ Choose one of the following:
 
 ### Adding the Package and Dependencies
 
-The `ElectricityNetworkReduction` module requires several key libraries for optimisation and data handling, including `JuMP`, `DataFrames`, `XLSX`, solvers `HiGHS` and `Ipopt`, and plotting libraries `CairoMakie` and `GraphMakie`.
+The `ElectricityNetworkReduction` module requires several key libraries for optimisation and data handling, including `JuMP`, `DataFrames`, `XLSX`, solvers `HiGHS`, `Ipopt` and `SCIP`, and plotting libraries `CairoMakie` and `GraphMakie`.
 
 * Run the following commands to install the package directly from GitHub:
 
@@ -58,7 +58,7 @@ For large networks, start Julia with multiple threads to enable multi-threaded T
 julia --threads=auto
 ```
 
-Then set `CONFIG.parallel_processing = true` (it is `true` by default). Julia prints a warning if this flag is set but only one thread is available.
+Then set `CONFIG.parallel_processing = true` (it is `false` by default). Julia prints a warning if this flag is set but only one thread is available.
 
 ---
 
@@ -91,7 +91,7 @@ If a flag is set to `true` but the sheet is absent from the file, the model issu
 
 ### Data Fields and Units
 
-The model constructs the bus admittance matrix ($Y_{bus}$) and computes PTDFs based on the physical parameters provided.
+The model builds the DC network matrix from the series reactances (X) and computes PTDFs from it. R and B are read and converted (they appear in `Line_Details`) but do not affect PTDFs or TTCs.
 Correct specification of units is **critical**, especially when performing per-unit (p.u.) conversions.
 
 ### Lines and Tielines Sheets
@@ -110,11 +110,10 @@ The following parameters are required for both **Lines** and **Tielines**:
 > **Unit Sensitivity**
 >
 > * If **R, X, B** are already provided in **per-unit (p.u.)**, set `CONFIG.in_pu = true`. No additional electrical parameters are required.
-> * If **R, X, B** are provided in **Ohms**, set `CONFIG.in_pu = false` and also specify:
->   * **Voltage_level (kV)**
->   * **Current rating (A)**
+> * If they are provided in physical units, set `CONFIG.in_pu = false`. **R and X must be in ohms (Ω)** and **B in microsiemens (µS)**, and every line needs a **Voltage_level (kV)** column, which is used for the conversion:
+>   $Z_{base} = V^2 / S_{base}$, $R_{pu} = R / Z_{base}$, $X_{pu} = X / Z_{base}$, $B_{pu} = B \cdot 10^{-6} \cdot Z_{base}$.
 >
-> Without these values, the model cannot perform per-unit conversion, which will lead to incorrect results.
+> Without the voltage level, the model cannot perform per-unit conversion, which will lead to incorrect results. Thermal limits are always taken from `Capacity_MW`; a current rating column, if present, is not used.
 
 ### DCLines Sheet
 
@@ -155,6 +154,8 @@ Converter stations map DC cable terminal buses to their adjacent AC substation b
 | Capacity_MW | Converter rated capacity in MW |
 
 After remapping, DC terminal buses are removed from the node list and the DC line endpoints point to AC buses.
+
+`Capacity_MW` limits the DC lines connected to the converter: each DC line's capacity becomes the minimum of its own rating and the ratings of the converters at its two terminals. When several DC lines between the same pair of representative nodes share a converter, their combined capacity is also capped by that converter's rating.
 
 ### Nodes Sheet
 
@@ -216,7 +217,7 @@ CONFIG.parallel_processing = true           # requires Julia started with --thre
   Selects the method used to determine equivalent line capacities:
   * `"QP"`: Quadratic Programming (default; via Ipopt), fits the AC TTC objective quickly.
   * `"LP"`: Deterministic capacity-envelope construction with HiGHS fixed-value extraction.
-  * `"MIQP"`: Mixed-integer binding-line formulation via HiGHS, with candidate pruning and time/gap controls.
+  * `"MIQP"`: Conservative binding-line MIQP with squared relative errors, using SCIP by default (another MIQP solver can be selected, see [MIQP solver selection](@ref)).
 
 * `base`:
   System base power in MVA. All results are internally computed in per-unit and exported in MW using this base.
@@ -226,13 +227,13 @@ CONFIG.parallel_processing = true           # requires Julia started with --thre
 
 * `in_pu`:
   Set to `true` if line parameters (R, X, B) are already provided in per-unit.
-  If `false`, the model will convert values from physical units using voltage and current ratings.
+  If `false`, R and X are converted from ohms and B from µS using each line's `Voltage_level`.
 
 * `allow_virtual_lines`:
-  Set to `false` to keep only synthetic lines that correspond to physically connected zone pairs in the original network. When `false`, any Kron-reduced synthetic line between zones with no direct physical connection is removed. If filtering removes all lines, the model falls back to allowing virtual lines automatically.
+  Set to `false` to keep only synthetic lines that correspond to physically connected zone pairs in the original network. When `false`, any Kron-reduced synthetic line between zones with no direct physical connection is removed from the reduced network *before* its PTDFs are computed, so capacities are fitted, and the equivalent TTC evaluated, on exactly the network that is exported. Removing lines changes the flow pattern, so expect larger TTC errors than with virtual lines allowed. If filtering removes all lines, the model keeps the unfiltered network with a warning; a warning is also printed if filtering splits the reduced network into separate AC islands.
 
 * `rep_node_mode`:
-  Two modes are available: `"auto"` or `"manual_excel"`. In `"auto"` mode, `rep_node_k_per_zone` highest-degree nodes are selected per zone (degree ties are broken by total incident line capacity). If this leaves an AC island without a representative, the best-ranked bus in that island is added automatically. In `"manual_excel"` mode, representative nodes must be flagged in the `IsRepresentative` column of the `Nodes` sheet. Falls back to `"auto"` with a warning if the column is missing or empty.
+  Two modes are available: `"auto"` or `"manual_excel"`. In `"auto"` mode, `rep_node_k_per_zone` highest-degree nodes are selected per zone (degree ties are broken by total incident line capacity). In `"manual_excel"` mode, representative nodes must be flagged in the `IsRepresentative` column of the `Nodes` sheet. Falls back to `"auto"` with a warning if the column is missing or empty. In both modes, all buses of zones in `high_res_zones` are retained, and if an AC island is left without a representative, the best-ranked bus in that island is added automatically.
 
 * `high_res_zones`:
   List of zone codes to retain at **full bus resolution** in the reduced network. All buses in these zones become representative nodes; all other zones are reduced to one (or `k`) representative node(s). Leave as `[]` (default) for standard single-representative-per-zone reduction.
@@ -293,25 +294,46 @@ The pipeline executes the following steps in order:
 
 2. **Island detection and original network plot** (if `enable_plots = true`) — builds the full network graph (AC + DC edges), labels connected components, and saves `Network_Original_<suffix>.png`.
 
-3. **Build the admittance matrix ($Y_{bus}$) and export diagnostics** — assembles the full-network bus admittance matrix from AC lines and transformers. Exports island diagnostics, bus ID map, and line details.
+3. **Build the DC network matrix and export diagnostics** — assembles the full-network DC susceptance (Laplacian) matrix from the series reactances of AC lines and transformers. Exports island diagnostics, bus ID map, and line details.
 
 4. **Select representative nodes** — identifies one or more representative nodes per zone, either automatically by network degree or from a manual Excel column (controlled by `CONFIG.rep_node_mode`). Zones in `CONFIG.high_res_zones` are retained at full resolution.
 
 5. **Build virtual line filter and DC capacity map** — determines which synthetic lines correspond to directly connected zone pairs (AC or DC). Aggregates DC line capacities by representative-node pair, mapping each DC endpoint to a representative in its own AC connected component. Same-zone DC lines are skipped only when both endpoints are in the same AC component; same-zone DC bridges between separate AC islands are retained.
 
-6. **Original network TTC/PTDF analysis** — computes TTC for all canonical bus-pair transactions using PTDFs. DC capacity is added additively: $TTC = TTC_{AC} + C_{DC}$. Parallelised across CPU threads when `parallel_processing = true`.
+6. **Original network TTC/PTDF analysis** — computes TTC for every pair of representative nodes using PTDFs. DC capacity is added additively: $TTC = TTC_{AC} + C_{DC}$. Parallelised across CPU threads when `parallel_processing = true`.
 
-7. **Kron reduction** — eliminates all non-representative nodes, producing a reduced admittance matrix and a set of synthetic lines between representative nodes.
+7. **Kron reduction** — eliminates all non-representative nodes, producing a reduced network matrix and a set of synthetic lines between representative nodes. With `allow_virtual_lines = false`, virtual lines are then removed from it.
 
-8. **Reduced-network PTDF computation** — repeats the PTDF calculation on the reduced topology. Intra-high-res zone pairs are skipped.
+8. **Reduced-network PTDF computation** — repeats the PTDF calculation on the (filtered) reduced network. Cross-island transactions have no AC transfer path. Intra-high-res pairs are skipped in mixed-resolution reductions; when every retained bus is high-resolution, all connected pairs are evaluated.
 
-9. **Capacity optimisation** — solves the QP/LP/MIQP capacity-fitting problem. AC synthetic capacities are fitted to the AC TTC component; DC capacity is added back in the reported total TTC and exported as `is_dc = true`. Intra-high-res synthetic lines are fixed to their physical capacity (not optimised).
+9. **Capacity optimisation** — solves the QP/LP/MIQP capacity-fitting problem. AC synthetic capacities are fitted to the AC TTC component. The equivalent TTC is then evaluated from the final capacities as $\min_l C_l / |PTDF_{t,l}|$, the TTC the exported network actually delivers, and DC capacity is added back and exported as `is_dc = true`. Intra-high-res synthetic lines are fixed to their physical capacity (not optimised).
 
 10. **Reduced network visualisation** (if `enable_plots = true`) — saves `Network_Reduced_<suffix>.png` and `Network_Original_vs_Reduced_<suffix>.png`.
 
 11. **TTC comparison and result export** — writes all intermediate and final outputs to CSV files in `output_dir`.
 
 Progress information and solver status messages are printed to the console during execution. A timing summary is printed on completion.
+
+---
+
+### Example: the European network (case_EU)
+
+`test/inputs/case_EU` contains a European transmission network with 6,863 buses, 9,162 AC lines, 878 transformers, 39 DC lines and 71 converters. It is not part of the batch test suite because of its run time, and its outputs are not stored in the repository. Run it with the DC, transformer and converter sheets enabled; parallel processing is recommended (start Julia with `--threads=auto`):
+
+```julia
+using ElectricityNetworkReduction
+
+CONFIG.input_filename      = "case_EU.xlsx"
+CONFIG.case_study          = "case_EU"
+CONFIG.has_dc_lines        = true
+CONFIG.has_transformers    = true
+CONFIG.has_converters      = true
+CONFIG.parallel_processing = true
+
+main_full_analysis("test/inputs/case_EU", "test/outputs/case_EU")  # ignored by git
+```
+
+With the default QP, the network is reduced to 38 representative nodes connected by 66 AC and 24 DC synthetic lines. Of the 703 representative-node transactions, 459 have a finite original TTC.
 
 ---
 
@@ -338,7 +360,7 @@ After the run completes, the output directory will contain several CSV files doc
   Maps every original bus name to the sequential integer ID used internally. Use this to cross-reference results against the original network data.
 
 * `Island_Diagnostics_<suffix>.csv`:
-  Per-island summary produced by `diagnose_islands`, one row per AC-connected component, sorted largest-first. Columns: `island_id`, `n_buses`, `zones`, `voltage_kv`, `dc_bridge`, `diagnosis`, `suspect_zones`.
+  Per-island summary produced by `diagnose_islands`, one row per AC-connected component, sorted largest-first. Columns: `island_id`, `rank`, `n_buses`, `zones`, `voltage_kv`, `dc_bridge`, `diagnosis`, `suspect_zones`.
 
   The `diagnosis` column classifies each island as one of:
 
@@ -360,7 +382,10 @@ After the run completes, the output directory will contain several CSV files doc
   The optimised capacities of synthetic lines in the reduced network. Columns: `from`, `to`, `from_node`, `to_node`, `capacity_MW`, `capacity_pu`, `X_pu` (equivalent reactance back-computed from Kron-reduced $Y_{bus}$), `is_dc` (true for DC interconnectors appended from the original network).
 
 * `TTC_Comparison_<suffix>.csv`:
-  Main comparison of Total Transfer Capacities between the original full network and the reduced equivalent network. `TTC_Equivalent_MW` is the reduced-network TTC produced by the selected optimisation mode. `TTC_Mismatch_MW`/`TTC_Error_Pct` measure how far it is from `TTC_Original_MW`.
+  Main comparison of Total Transfer Capacities between the original full network and the reduced equivalent network. `TTC_Equivalent_MW` is the TTC of the exported equivalent network, $\min_l C_l / |PTDF_{t,l}| + C_{DC}$, evaluated from the exported capacities in the same way for every optimisation mode. `TTC_Mismatch_MW`/`TTC_Error_Pct` measure how far it is from `TTC_Original_MW`.
+
+* `Solver_Diagnostics_<suffix>.csv` *(MIQP only)*:
+  Solver status, objective, bound, optimality gap and timing of the MIQP solve (see [MIQP solver selection](@ref)).
 
 Choose the optimisation mode according to the study objective:
 
@@ -370,11 +395,73 @@ Choose the optimisation mode according to the study objective:
 
 Pick the formulation that matches the study goal and read its `TTC_Equivalent_MW` directly.
 
+### MIQP solver selection
+
+SCIP is included as the default MIQP solver. The mathematical objective
+is squared relative AC TTC error, with a binding line and
+`TTC_eq <= TTC_original_AC` for calibrated transactions. MIQP does not use the
+QP `lambda` capacity penalty.
+
+SCIP is used only for MIQP. The QP has no integer variables and is solved with
+Ipopt, which returns the same capacities as SCIP but faster. The LP envelope needs no
+iterative solver.
+
+SCIP works with the supplied smaller case studies, but MIQPs for networks with
+thousands of buses, such as ACTIVSg2000, can take substantially longer and may finish
+with a feasible solution and a nonzero optimality gap. A faster MIQP solver
+can improve the incumbent or the optimality bound within a given time budget;
+exact matching of all original TTCs is still not expected.
+
+#### Using another MIQP solver
+
+Any MIQP-capable solver with a JuMP interface can replace SCIP. Such solvers
+are not shipped with or required by this package. Install the solver, its
+Julia interface and any licence it needs in your own study environment (for
+example a project activated with `Pkg.activate(".")` in your analysis
+folder), not in this repository. Then select it before running the analysis:
+
+```julia
+using ElectricityNetworkReduction
+using SolverPackage  # the solver's Julia interface
+
+CONFIG.optimisation_type = "MIQP"
+CONFIG.miqp_optimizer = SolverPackage.Optimizer
+CONFIG.miqp_time_limit_sec = 10800.0  # example three-hour budget
+CONFIG.miqp_mip_rel_gap = 1e-4
+CONFIG.miqp_optimizer_attributes = Dict{String,Any}(
+    # solver-specific parameters, using the solver's own names
+)
+main_full_analysis(input_dir, output_dir)
+```
+
+The time limit and relative gap are passed to every solver through JuMP's
+solver-independent attributes. With SCIP, the feasibility tolerance is also
+tightened to `1e-9` so that the binding equalities pass the post-solve
+consistency check. For another solver, set its integrality or feasibility
+tolerance to a similar value through `miqp_optimizer_attributes`. Clear
+`miqp_optimizer_attributes` when changing solvers, so parameters from the
+previous solver are not passed to the new one. To switch back, import SCIP
+and assign `CONFIG.miqp_optimizer = SCIP.Optimizer`. See the
+[JuMP list of supported solvers](https://jump.dev/JuMP.jl/stable/installation/#Supported-solvers)
+and the [SCIP.jl documentation](https://github.com/scipopt/SCIP.jl).
+
+Start Julia with `--threads=auto` and set `parallel_processing = true` to
+parallelise original-network TTC enumeration. This is separate from the
+MIQP solver's parallel settings; it does not automatically make SCIP's integer
+search use all Julia threads.
+
+`Solver_Diagnostics_<suffix>.csv` records solver status, objective bound,
+relative gap, timing, calibration size and binding counts. A time-limited
+feasible result is an incumbent, not a proof of optimality. MIQP comparison
+exports use `in_calibration` to identify the conservative fit's transactions.
+Fixed-only and unsupported AC transfers are evaluated directly, and DC
+capacities remain additive.
+
 ### Interpreting the Results
 
 A successful reduction should exhibit:
 
-* Small TTC mismatches (typically < 0–2%), checked via `TTC_Error_Pct` in `TTC_Comparison_<suffix>.csv`
+* TTC approximation errors appropriate to the intended study, reported in `TTC_Comparison_<suffix>.csv`. Reducing thousands of buses to a few dozen loses detail; one rating per equivalent line cannot generally reproduce every original transfer limit or the full congestion behaviour. There is no fixed error cutoff.
 * Physically consistent flow sensitivities
 * A significantly reduced network size (tens of nodes instead of thousands)
 
@@ -383,8 +470,8 @@ If large TTC errors are observed, review:
 * Zone definitions and representative node selection
 * Unit consistency (per-unit vs physical units)
 * `ptdf_epsilon` (if too large, important PTDF contributions are dropped)
-* Solver configuration (`lambda` for QP, `bigM_factor` for MIQP)
-* Island diagnostics — `SUSPECT` islands indicate a missing transformer branch; unexpected `SINGLETON` islands indicate a disconnected/mistyped bus; see [Key Output Files](#key-output-files) above for the full breakdown of all four diagnosis categories
+* Solver configuration (`lambda` for QP; solver, time limit, gap and `miqp_gamma_C` for MIQP)
+* Island diagnostics — `SUSPECT` islands indicate a missing transformer branch; unexpected `SINGLETON` islands indicate a disconnected/mistyped bus; see [Key Output Files](@ref) above for the full breakdown of all four diagnosis categories
 
 ### Advanced: Troubleshooting
 
@@ -392,8 +479,8 @@ If the optimisation fails to converge, consider:
 
 * **Checking Connectivity:** Ensure all representative nodes are electrically connected in the original network.
 * **Adjusting Lambda:** Increase $\lambda$ in `CONFIG` if synthetic capacities are fluctuating significantly.
-* **MIQP controls:** For `"MIQP"` (MILP), adjust `CONFIG.miqp_binding_candidates_per_txn`, `CONFIG.miqp_time_limit_sec`, or `CONFIG.miqp_mip_rel_gap` if binding-line fitting is slow or too coarse.
-* **Large `TTC_Error_Pct` under MIQP/LP:** the reduced network cannot realise that transaction's target exactly with one static capacity per synthetic line. Consider more representative nodes, allowing virtual lines, or using high-resolution zones.
+* **MIQP controls:** For `"MIQP"`, adjust `CONFIG.miqp_binding_candidates_per_txn`, `CONFIG.miqp_time_limit_sec`, or `CONFIG.miqp_mip_rel_gap` if binding-line fitting is slow or too coarse.
+* **Large `TTC_Error_Pct`:** the reduced network cannot realise that transaction's target exactly with one static capacity per synthetic line. Positive errors (over-estimated TTC) are typical of QP and LP, which only bound TTC from above while fitting; MIQP instead selects a binding line for each transaction. Consider trying MIQP, more representative nodes, allowing virtual lines, or using high-resolution zones.
 * **Cross-island transactions:** If the original network has true electrical islands, ensure DC interconnectors are loaded (with `CONFIG.has_dc_lines = true`) so cross-island TTC is attributed correctly rather than defaulting to infinity.
 
 ---

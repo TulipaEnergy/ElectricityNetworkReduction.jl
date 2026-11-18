@@ -6,6 +6,7 @@ on:
       - main
     tags: ["*"]
   workflow_dispatch:
+  pull_request:
 
 jobs:
   test:
@@ -15,8 +16,7 @@ jobs:
       version: ${{ matrix.version }}
       arch: ${{ matrix.arch }}
       allow_failure: ${{ matrix.allow_failure }}
-      run_codecov: ${{ matrix.version == '1' && matrix.os == 'ubuntu-latest' }}
-      run_slow_tests: true
+      run_codecov: ${{ github.event_name != 'pull_request' && matrix.version == '1' && matrix.os == 'ubuntu-latest' }}
     secrets:
       codecov_token: ${{ secrets.CODECOV_TOKEN }}
     strategy:

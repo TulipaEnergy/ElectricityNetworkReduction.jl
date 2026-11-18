@@ -10,8 +10,8 @@ Modify the default values below to run different case studies.
 """
 Base.@kwdef mutable struct Config
     # Data input/output
-    input_filename::String = "case_NL.xlsx"   # Input Excel file name
-    case_study::String = "case_NL"            # Case study identifier
+    input_filename::String = "case118.xlsx"   # Input Excel file name
+    case_study::String = "case118"            # Case study identifier
 
     # Flags that change per case study
     bus_names_as_int::Bool = false      # true if bus names are integers
@@ -20,19 +20,22 @@ Base.@kwdef mutable struct Config
 
     # Numerical parameters
     base::Float64 = 100.0               # MVA base for per-unit conversion
-    # "QP" (default), "LP", or "MIQP". QP is a fast continuous fit that reports
-    # its fitted TTC in the exported comparison. LP uses a deterministic
-    # capacity-envelope construction. MIQP uses a pruned binding-line MILP and
-    # reports the TTC implied by the final exported capacities.
+    # "QP" (default), "LP", or "MIQP". QP is a fast continuous fit, LP a
+    # deterministic capacity-envelope construction, MIQP a conservative
+    # binding-line model with squared relative errors. All report physical TTC.
     optimisation_type::String = "QP"
     lambda::Float64 = 1e-6              # Regularisation parameter
     ptdf_epsilon::Float64 = 1e-6        # PTDF zero threshold
     suffix::String = "QP"                 # Suffix for output files
 
-    # MIQP/MILP controls. Candidate pruning keeps the integer model small by
-    # allowing each transaction to choose among only the most likely limiting
-    # synthetic lines. Set to a large value to recover the full MILP.
-    miqp_binding_candidates_per_txn::Int = 8
+    # SCIP is the open-source default. Any other MIQP-capable JuMP solver may be
+    # assigned after installing/importing it separately; solver-specific
+    # parameters go in miqp_optimizer_attributes.
+    miqp_optimizer::Any = SCIP.Optimizer
+    miqp_optimizer_attributes::Dict{String,Any} = Dict{String,Any}()
+    miqp_binding_candidates_per_txn::Int = 0 # 0 considers all relevant branches
+    miqp_safe_binding_screening::Bool = true
+    miqp_gamma_C::Float64 = 1.0
     miqp_time_limit_sec::Float64 = 1800.0
     miqp_mip_rel_gap::Float64 = 1e-4
 
@@ -122,11 +125,6 @@ Base.@kwdef mutable struct Config
     #   julia --threads=auto      (uses all logical CPU cores — recommended)
     #   julia -t 8                (exactly 8 threads)
     #   julia -t 24                (exactly 24 threads)
-    #
-    # The PTDF basis computation (LU factorisation + back-solves) is always
-    # run sequentially because SuiteSparse UMFPACK back-solves are not
-    # thread-safe on a shared factorisation object.
-    #
     # Has no effect when Julia is running with a single thread (a warning is
     # printed in that case so the user knows to restart with --threads).
     parallel_processing::Bool = false

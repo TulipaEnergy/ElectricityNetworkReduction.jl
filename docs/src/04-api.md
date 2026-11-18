@@ -28,7 +28,7 @@ These functions handle the initial stage of reading input data from an Excel wor
   Assigns sequential integer IDs to all AC buses and returns updated DataFrames alongside the node metadata table. Preserves the `IsRepresentative` column and `Latitude`/`Longitude` columns from the Nodes sheet. Converts AC line parameters to per-unit.
 
 - **`convert_line_to_pu!(df, baseMVA; in_pu)`**
-  Converts line parameters from physical units (Ohms) to per-unit values using the `Voltage_level` column, if required.
+  Converts line parameters from physical units (R and X in ohms, B in µS) to per-unit values using the `Voltage_level` column, if required.
   If `in_pu = true`, parameters are assumed already in per-unit. Modifies the data frame in place.
 
 - **`process_dclines(dclines_df, Sbase)`**
@@ -46,11 +46,14 @@ These functions handle the initial stage of reading input data from an Excel wor
 - **`build_converter_map(converters_df)`**
   Returns a `Dict{String,String}` mapping each DC terminal bus name to its connected AC substation bus name. Used by `remap_dc_endpoints!` before numeric ID assignment.
 
+- **`apply_converter_limits!(dclines_df, converters_df, Sbase)`**
+  Limits each DC line's capacity to the ratings of the converters at its two terminals (`min(line, converter_from, converter_to)`) and records the converter used at each end, so that `build_dc_capacity_map` can also cap lines sharing a converter. Must run before `remap_dc_endpoints!`, while endpoints are still DC terminal names.
+
 - **`remap_dc_endpoints!(dclines_df, converter_map)`**
-  Rewrites DC line endpoint bus names in-place: DC cable terminal names are replaced by their adjacent AC substation bus names using the converter map. Endpoints with no converter entry are left unchanged. This step must run before `rename_buses` so DC terminals are excluded from the Y-bus.
+  Rewrites DC line endpoint bus names in-place: DC cable terminal names are replaced by their adjacent AC substation bus names using the converter map. Endpoints with no converter entry are left unchanged (but stored as cleaned strings, also for integer bus names). This step must run before `rename_buses` so DC terminals are excluded from the Y-bus.
 
 - **`build_dc_capacity_map(dclines_df, node_info, rep_node_ids; lines_df, tielines_df)`**
-  Aggregates DC line capacities (in p.u.) by representative-node pair. When AC line data are provided, each DC endpoint is mapped to a representative in its own AC connected component. Same-zone DC lines are skipped only when both endpoints are in the same AC component; same-zone DC bridges between separate AC islands are retained. Returns a `Dict{Tuple{Int,Int}, Float64}` keyed by `(min_rep_id, max_rep_id)`. Used for additive TTC contribution in reporting and exported equivalent capacities.
+  Aggregates DC line capacities (in p.u.) by representative-node pair. When AC line data are provided, each DC endpoint is mapped to a representative in its own AC connected component. Same-zone DC lines are skipped only when both endpoints are in the same AC component; same-zone DC bridges between separate AC islands are retained. If the lines carry converter information (from `apply_converter_limits!`), each pair's total is capped, on each side, by the summed rating of the distinct converters it uses. Returns a `Dict{Tuple{Int,Int}, Float64}` keyed by `(min_rep_id, max_rep_id)`. Used for additive TTC contribution in reporting and exported equivalent capacities.
 
 ---
 
@@ -58,11 +61,14 @@ These functions handle the initial stage of reading input data from an Excel wor
 
 These functions construct the mathematical representation of the electrical network.
 
-- **`form_ybus_with_shunt(lines, tielines, nodes, Sbase)`**
-  Assembles the bus admittance matrix ($Y_{bus}$), including the contribution of line shunt susceptances. AC lines and transformers (after merging) are included; DC interconnectors are excluded.
+- **`form_dc_ybus(lines, tielines, nodes, Sbase)`**
+  Assembles the lossless DC Laplacian from series reactances only ($b = 1/X$; resistance, charging and shunts are ignored), returned in the complex form $-jB$. This is the matrix used for representative-node selection, PTDFs, TTCs and Kron reduction. AC lines and transformers (after merging) are included; DC interconnectors are excluded. Requires positive, finite `X_pu`.
 
-- **`calculate_all_ttc_results(Ybus, lines_df, tie_lines_df; dc_cap_map)`**
-  Memory-optimised TTC computation for all $\binom{N}{2}$ bus-pair transactions. Factorises the $B$ matrix once, then computes PTDFs and TTC via shared back-solves. DC capacity is added additively using `dc_cap_map`. Supports multi-threaded execution when `CONFIG.parallel_processing = true`. Returns both the TTC DataFrame and a `Dict` of per-pair physical line capacities for downstream use.
+- **`form_ybus_with_shunt(lines, tielines, nodes, Sbase)`**
+  Assembles the full AC bus admittance matrix ($Y_{bus}$), including resistance and line shunt susceptances. Not used by the reduction pipeline (PTDF functions reject it); kept for users who need an AC $Y_{bus}$.
+
+- **`calculate_all_ttc_results(Ybus, lines_df, tie_lines_df; dc_cap_map, transaction_nodes)`**
+  Memory-optimised TTC computation for all pairwise transactions between `transaction_nodes` (default: all $\binom{N}{2}$ bus pairs; `main_full_analysis` passes the representative nodes). Factorises the $B$ matrix once, then computes PTDFs and TTC via shared back-solves. DC capacity is added additively using `dc_cap_map`. Supports multi-threaded execution when `CONFIG.parallel_processing = true`. Returns both the TTC DataFrame and a `Dict` of per-pair physical line capacities for downstream use (parallel branches combined by their tightest angle limit, $\sum b \cdot \min C/b$).
 
 - **`calculate_single_injection_ptdfs(Ybus; reference_bus=1)`**
   Core PTDF engine. Factorises the susceptance matrix once and computes voltage-angle sensitivities to unit injections at every non-reference bus. Handles multi-island networks by assigning one reference bus per AC connected component. Returns `(ptdf_single, lines_info, node_component)`. Used internally by `calculate_all_ttc_results` and `calculate_ptdfs_reduced`.
@@ -96,16 +102,19 @@ These functions implement the core algorithms used to reduce the size of the net
 
 - **`select_representative_nodes(Ybus, node_info, numbered_lines, numbered_tielines)`**
   Identifies representative nodes within each zone. Supports two modes controlled by `CONFIG.rep_node_mode`:
-  - `"auto"`: selects the top `CONFIG.rep_node_k_per_zone` nodes per zone ranked by interconnection degree (line capacity as tiebreaker). Zones listed in `CONFIG.high_res_zones` are retained at full bus resolution (all buses become representative nodes). If this leaves an AC island without any representative, the best-ranked bus in that island is added as a forced representative.
-  - `"manual_excel"`: reads the `IsRepresentative` column from the Nodes sheet.
+  - `"auto"`: selects the top `CONFIG.rep_node_k_per_zone` nodes per zone ranked by interconnection degree (line capacity as tiebreaker).
+  - `"manual_excel"`: reads the `IsRepresentative` column from the Nodes sheet. Falls back to `"auto"` with a warning if the column is missing or empty.
 
-  Falls back to `"auto"` with a warning if the column is missing or empty in manual mode.
+  In both modes, zones listed in `CONFIG.high_res_zones` are retained at full bus resolution (all buses become representative nodes), and if an AC island is left without any representative, the best-ranked bus in that island is added as a forced representative. Returns `(rep_nodes_df, node_info)`; `rep_nodes_df` has columns `new_id`, `old_name`, `zone`, `area`, `degree`, `total_line_cap` in both modes.
 
 - **`kron_reduce_ybus(Ybus, representative_nodes)`**
-  Applies Kron reduction to eliminate internal nodes while preserving sensitivity relationships between representative nodes. Handles multi-island networks by applying small shunt regularisation ($\varepsilon = 10^{-8}$) before inversion to avoid singularity.
+  Applies Kron reduction to eliminate internal nodes while preserving sensitivity relationships between representative nodes. If every bus is a representative node, nothing is eliminated and the matrix is returned reordered. Handles multi-island networks by applying small shunt regularisation ($\varepsilon = 10^{-8}$) before inversion to avoid singularity.
+
+- **`filter_reduced_network(Y_kron, rep_node_ids, allowed_pairs)`**
+  Removes virtual lines from the Kron-reduced network: a synthetic line is kept only if its `(min, max)` bus-id pair is in `allowed_pairs`. Removed susceptance is also taken out of the diagonal, so the result is a consistent DC Laplacian of the exported network. Compute reduced PTDFs on the returned matrix. Keeps the unfiltered network (with a warning) if no line would survive, and warns when filtering splits the network into separate AC islands. Used by `main_full_analysis` when `CONFIG.allow_virtual_lines = false`.
 
 - **`calculate_ptdfs_reduced(Y_kron, rep_node_ids; high_res_ids)`**
-  Calculates PTDFs for the smaller equivalent network using local indices and maps back to original IDs. When `high_res_ids` is non-empty, intra-high-res zone pairs are skipped to avoid the $O(n_{hires}^2)$ computation.
+  Calculates PTDFs for the smaller equivalent network using local indices and maps back to original IDs. Cross-island transactions have no AC PTDF rows. Intra-high-res pairs are skipped for mixed-resolution reductions; when every retained bus is high-resolution, all connected transactions are evaluated.
 
 ---
 
@@ -113,10 +122,21 @@ These functions implement the core algorithms used to reduce the size of the net
 
 These functions use mathematical programming to determine synthetic line capacities for the reduced network.
 
-- **`optimise_equivalent_capacities(ttc_original, ptdf_reduced_results; Type, lambda, allow_virtual_lines, allowed_synth_pairs, dc_cap_map, high_res_node_ids, phys_line_caps)`**
-  Primary interface for solving the capacity fitting problem. Dispatches to `_solve_qp_model`, `_solve_lp_model`, or `_solve_miqp_model` based on `Type`. `QP` provides a fast accuracy/time balance, `LP` constructs a deterministic capacity envelope, and `MIQP` identifies binding synthetic lines with physically consistent capacities. DC capacity is added back in reported total TTC. Intra-high-res synthetic lines are fixed to their physical capacity and excluded from optimisation.
+- **`optimise_equivalent_capacities(ttc_original, ptdf_reduced_results; Type, lambda, gamma_C, optimizer_factory, dc_cap_map, high_res_node_ids, phys_line_caps, rep_node_ids, reduced_ybus, solver_diagnostics_path)`**
+  Primary interface for solving the capacity fitting problem. Dispatches to `_solve_qp_model`, `_solve_lp_model`, or `_solve_miqp_model` based on `Type`. `QP` provides a fast accuracy/time balance, `LP` constructs a deterministic capacity envelope, and `MIQP` identifies binding synthetic lines with physically consistent capacities. Every synthetic line present in `ptdf_reduced_results` is a candidate, so virtual lines must already have been removed (with `filter_reduced_network`) from the network those PTDFs were computed on. Intra-high-res synthetic lines are fixed to their physical capacity and excluded from optimisation.
+
+  Pass `rep_node_ids` and `reduced_ybus` to include isolated retained buses and preserve synthetic edges absent from the enumerated transactions. The full workflow supplies both. Physical capacities fixed at zero remain zero.
+
+  The returned `TTC_Equivalent_pu` is evaluated from the final capacities as $\min_l C_l/|PTDF_{t,l}|$ plus additive DC capacity. QP's internal fitted TTC variable need not equal this minimum; MIQP additionally enforces a binding-line choice. Every mode is checked from its final capacities.
 
   Returns a tuple `(equivalent_capacities_df, ttc_equivalent_df)`.
+
+  MIQP minimises squared relative errors with an original-AC-TTC upper bound,
+  all binding candidates by default, safe objective screening, a complete
+  conservative start and deterministic capacity closure. SCIP is the default;
+  `optimizer_factory` or `CONFIG.miqp_optimizer` may select any other installed
+  MIQP-capable JuMP optimizer. Optional diagnostics retain the original solve's
+  status and gap. `in_calibration` marks transactions subject to the conservative fit.
 
 ---
 
@@ -125,7 +145,7 @@ These functions use mathematical programming to determine synthetic line capacit
 These functions and objects control the full end-to-end execution of the model.
 
 - **`main_full_analysis(input_dir, output_dir)`**
-  High-level wrapper that executes the complete 11-step network reduction pipeline, from data loading to result export. Prints a step-by-step timing summary on completion. Returns `nothing`; all results are written to CSV files in `output_dir`.
+  High-level wrapper that executes the complete 11-step network reduction pipeline, from data loading to result export. Creates `output_dir` if it does not exist. Prints a step-by-step timing summary on completion. Returns `nothing`; all results are written to CSV files in `output_dir`.
 
 - **`CONFIG`**
   Global configuration object. All parameters and their defaults:
@@ -139,10 +159,14 @@ These functions and objects control the full end-to-end execution of the model.
   | `bus_names_as_int` | Bool | `false` | `true` if bus IDs are integers |
   | `in_pu` | Bool | `false` | `true` if R, X, B already in per-unit |
   | `allow_virtual_lines` | Bool | `false` | Keep only physically connected synthetic lines |
-  | `lambda` | Float64 | `1e-6` | Regularisation parameter (QP/MIQP) |
+  | `lambda` | Float64 | `1e-6` | QP capacity regularisation |
   | `ptdf_epsilon` | Float64 | `1e-6` | PTDF zero threshold |
   | `suffix` | String | `"QP"` | Suffix for output file names |
-  | `miqp_binding_candidates_per_txn` | Int | `8` | Binding candidates retained per transaction in MIQP |
+  | `miqp_optimizer` | Any | `SCIP.Optimizer` | MIQP optimizer constructor (any MIQP-capable JuMP solver) |
+  | `miqp_optimizer_attributes` | Dict | empty | Additional solver-specific attributes |
+  | `miqp_binding_candidates_per_txn` | Int | `0` | Zero considers all relevant binding lines; positive enables heuristic pruning |
+  | `miqp_safe_binding_screening` | Bool | `true` | Objective-based safe screening |
+  | `miqp_gamma_C` | Float64 | `1.0` | Reference capacity-bound multiplier |
   | `miqp_time_limit_sec` | Float64 | `1800.0` | MIQP solver time limit |
   | `miqp_mip_rel_gap` | Float64 | `1e-4` | MIQP relative MIP gap |
   | `rep_node_mode` | String | `"auto"` | `"auto"` or `"manual_excel"` |
@@ -157,7 +181,7 @@ These functions and objects control the full end-to-end execution of the model.
   | `transformers_in_pu` | Bool | `true` | Transformer X already in per-unit |
   | `has_converters` | Bool | `false` | Read Converters sheet |
   | `converters_sheet` | String | `"Converters"` | Name of converters sheet |
-  | `parallel_processing` | Bool | `true` | Multi-threaded TTC enumeration |
+  | `parallel_processing` | Bool | `false` | Multi-threaded TTC enumeration |
 
 - **`reset_config!()`**
   Resets all configuration parameters to their default values. Always call this between case studies in batch runs to avoid state leakage.
@@ -208,7 +232,7 @@ The package follows a modular architecture, with each file responsible for a spe
 | `kron-reduction.jl` | Mathematical node elimination with multi-island regularisation |
 | `main-analysis.jl` | 11-step top-level wrapper; timing summary |
 | `network-visualisation.jl` | GIS-based (CairoMakie/GraphMakie) and legacy (Plots.jl) plot functions |
-| `optimisation.jl` | QP fit, LP capacity envelope, MIQP binding-line MILP, TTC reporting |
+| `optimisation.jl` | QP fit, LP capacity envelope, MIQP with relative squared-error fitting, TTC reporting |
 | `ptdf-calculations.jl` | DC power flow sensitivity analysis; parallel TTC enumeration |
 | `representative-nodes.jl` | Zone grouping, degree-based or manual node selection, high-res zone support |
 | `ybus-formation.jl` | Physical matrix assembly ($Y_{bus}$) |

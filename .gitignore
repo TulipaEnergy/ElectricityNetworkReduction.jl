@@ -4,12 +4,14 @@
 *.rej
 ~$*.xlsx
 
-# Private / confidential case study data (not for public repo)
-test/inputs/case_EU/
+# case_EU is run manually (not in the batch test); its results are too large
+# to version (~8 MB of CSVs and plots), so only the input is kept in the repository.
 test/outputs/case_EU/
 .DS_Store
 .benchmarkci
 Manifest.toml
+Manifest-v*.toml
+*.log
 benchmark/*.json
 coverage
 docs/build/

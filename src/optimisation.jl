@@ -1,53 +1,31 @@
-# --- OPTIMIZATION FUNCTIONS ---
+# Capacity fitting and evaluation.
 
 """
-    optimise_equivalent_capacities(
+    optimise_equivalent_capacities(ttc_original, ptdf_reduced_results;
+        Type=CONFIG.optimisation_type, lambda=CONFIG.lambda,
+        gamma_C=CONFIG.miqp_gamma_C, optimizer_factory=CONFIG.miqp_optimizer,
+        dc_cap_map, high_res_node_ids, phys_line_caps, rep_node_ids,
+        reduced_ybus, solver_diagnostics_path=nothing)
 
-    ttc_original::DataFrame,
-    ptdf_reduced_results::DataFrame;
-    Type::String = CONFIG.optimisation_type,
-    lambda::Float64 = CONFIG.lambda,
-    bigM_factor::Float64 = 5.0,
-    max_C_factor::Float64 = 3.0
-    )
+Fit AC equivalent capacities using QP, LP envelope, or MIQP.
+MIQP minimises the sum of squared relative AC TTC errors, enforces an actual
+binding line and bounds each calibrated TTC by its original target. SCIP is
+the default; any other installed MIQP-capable JuMP optimizer may be supplied.
+`gamma_C >= 1` scales the reference capacity bounds; `lambda` affects QP only.
 
-Optimise equivalent AC capacities for the reduced network using QP, MIQP, or LP.
+Return `(equivalent_capacities, ttc_equivalent_results)`. Reported TTCs are
+always evaluated from the exported capacities and the final reduced topology,
+with additive DC capacity. MIQP applies a deterministic capacity
+closure, validates fitted versus physical TTC and optionally writes solver
+status, bounds, gap and timing to `solver_diagnostics_path`.
 
-DC capacity is handled separately and added back in the reported total TTC.
-The primary `TTC_Equivalent` result is formulation-aware: QP reports the
-fitted TTC, while LP/MIQP report the recomputed TTC (obtained by recomputing
-TTC from the final exported capacities and reduced-network PTDFs).
-
-# Arguments
-- `ttc_original::DataFrame`: Original network TTC values
-- `ptdf_reduced_results::DataFrame`: PTDF results from reduced network
-- `Type::String`: Optimisation type: "QP", "MIQP", or "LP"
-- `bigM_factor::Float64`: Factor for big-M constraints (MIQP only)
-- `lambda::Float64`: Regularisation parameter for capacity smoothing
-
-# Returns
-- `equivalent_capacities::DataFrame`: Optimised synthetic line capacities
-
-# Mathematical Formulation
-
-## QP/LP Formulation:
-Minimise: Σ(TTC_eq[t] - TTC_orig[t])² + λ*Σ(C_eq[l]²)  (QP)
-or
-Maximise: Σ TTC_eq[t] (LP with TTC_eq[t] ≤ TTC_orig[t])
-Subject to: TTC_eq[t] ≤ C_eq[l] / |PTDF[t,l]| for all transactions t and lines l
-
-## MIQP (Linearized as MILP) Formulation:
-Minimise: Σ |TTC_eq[t] - TTC_orig[t]|  (L1 Norm for matching)
-Subject to:
-    # 1. Physical Capacity Constraints
-    TTC_eq[t] ≤ C_eq[l] / |PTDF[t,l]|            for all t, l
-
-    # 2. Exactly-One-Binding Logic (Linearized with Big-M)
-    TTC_eq[t] = Σ (Z[t,l] / |PTDF[t,l]|)         where Z[t,l] is allocated capacity
-    Z[t,l] ≤ C_eq[l]                            (always)
-    Z[t,l] ≥ C_eq[l] - M(1 - b[t,l])            (if b[t,l]=1, then Z=C_eq)
-    Z[t,l] ≤ M * b[t,l]                         (if b[t,l]=0, then Z=0)
-    Σ b[t,l] = 1                                (Exactly one line b binds transaction t)
+Filter virtual lines in the DC matrix before computing the supplied PTDFs.
+Pass `rep_node_ids` and `reduced_ybus` to retain isolated buses and edges absent
+from the enumerated PTDF transactions. Fixed physical zero ratings stay zero.
+Fit errors describe the approximation trade-off; no universal accuracy cutoff
+is imposed. Calibrated MIQP transactions are finite positive AC targets that
+load an optimisable line. Fixed-only and unsupported transfers are evaluated
+from their physical capacities without fitting.
 """
 
 function optimise_equivalent_capacities(
@@ -55,22 +33,25 @@ function optimise_equivalent_capacities(
     ptdf_reduced_results::DataFrame;
     Type::String = CONFIG.optimisation_type,
     lambda::Float64 = CONFIG.lambda,
-    bigM_factor::Float64 = 5.0,
-    max_C_factor::Float64 = 3.0,
-    allow_virtual_lines::Bool = CONFIG.allow_virtual_lines,
-    allowed_synth_pairs::Set{Tuple{Int,Int}} = Set{Tuple{Int,Int}}(),
+    gamma_C::Float64 = CONFIG.miqp_gamma_C,
+    optimizer_factory = CONFIG.miqp_optimizer,
     dc_cap_map::Dict{Tuple{Int,Int},Float64} = Dict{Tuple{Int,Int},Float64}(),
     high_res_node_ids::Set{Int} = Set{Int}(),
     phys_line_caps::Dict{Tuple{Int,Int},Float64} = Dict{Tuple{Int,Int},Float64}(),
+    rep_node_ids::Vector{Int} = sort!(
+        unique(
+            vcat(ptdf_reduced_results.synth_line_from, ptdf_reduced_results.synth_line_to),
+        ),
+    ),
+    reduced_ybus::Union{Nothing,SparseMatrixCSC{ComplexF64}} = nothing,
+    solver_diagnostics_path::Union{Nothing,String} = nothing,
 )
     println("\n--- OPTIMISING EQUIVALENT CAPACITIES (Type: $Type) ---")
 
     # Display selected solver based on optimisation type
-    # Map MIQP to MILP
 
     if Type == "MIQP"
-        println("Note: MIQP converted to MILP (linearized)")
-        println("Selected solver: HiGHS")
+        println("MIQP: squared relative error with conservative binding lines")
     elseif Type == "LP"
         println(
             "Selected solver: deterministic capacity envelope + HiGHS fixed-value extraction",
@@ -82,50 +63,24 @@ function optimise_equivalent_capacities(
     # 1. DATA PREPARATION (COMMON FOR ALL MODELS)
     # ------------------------------------------------------------
 
-    # Get unique synthetic lines from PTDF results
+    # Get unique synthetic lines from PTDF results. Virtual-line filtering has
+    # already been applied to the network these PTDFs were computed on.
     synth_lines_df = unique(ptdf_reduced_results, [:synth_line_from, :synth_line_to])
-
-    println("Candidate synthetic lines BEFORE any filtering: $(nrow(synth_lines_df))")
-
-    # ── Save the original unfiltered candidates for possible fallback ──
-    original_candidates = copy(synth_lines_df)
-
-    # === FILTER VIRTUAL LINES IF REQUESTED ===
-
-    if !allow_virtual_lines
-        println("→ Virtual lines disabled per config.")
-        println("   Keeping ONLY synth lines that correspond to original topology:")
-        println("     • ALL intra-zone synthetic lines")
-        println(
-            "     • Inter-zone synthetic lines ONLY if zones had direct physical connection",
-        )
-        old_count = nrow(synth_lines_df)
-
-        filter!(row -> begin
-            u = min(row.synth_line_from, row.synth_line_to)
-            v = max(row.synth_line_from, row.synth_line_to)
-            (u, v) ∈ allowed_synth_pairs
-        end, synth_lines_df)
-
-        new_count = nrow(synth_lines_df)
-        println("Remaining after topology-preserving filter: $new_count (was $old_count)")
-
-        # Automatic fallback
-        if new_count == 0
-            if old_count == 0
-                @error "PTDF results contain no synthetic lines at all..."
-                throw(ArgumentError("No candidate lines from Kron reduction"))
-            else
-                println(" No lines retained after topology filter.")
-                println(
-                    "→ Automatically enabling virtual lines for this run to avoid empty network.",
-                )
-                allow_virtual_lines = true
-                synth_lines_df = original_candidates
-                println("Restored $(nrow(synth_lines_df)) virtual/synthetic lines.")
+    # Keep physical edges even when none of the enumerated transactions uses
+    # them (e.g. retained high-resolution islands).
+    if !isnothing(reduced_ybus)
+        size(reduced_ybus) == (length(rep_node_ids), length(rep_node_ids)) ||
+            throw(ArgumentError("reduced_ybus dimensions must match rep_node_ids"))
+        allunique(rep_node_ids) || throw(ArgumentError("rep_node_ids must be unique"))
+        synth_lines_df = DataFrame(synth_line_from = Int[], synth_line_to = Int[])
+        for j in axes(reduced_ybus, 2), k in nzrange(reduced_ybus, j)
+            i = rowvals(reduced_ybus)[k]
+            if i < j && abs(imag(nonzeros(reduced_ybus)[k])) > 1e-10
+                push!(synth_lines_df, (rep_node_ids[i], rep_node_ids[j]))
             end
         end
     end
+    println("Candidate synthetic lines: $(nrow(synth_lines_df))")
 
     # ── Build canonical edge list and mapping ─────────────────────────────
     synth_lines = Tuple{Int,Int}[]
@@ -150,7 +105,9 @@ function optimise_equivalent_capacities(
         for (idx, (u, v)) in enumerate(synth_lines)
             if (u in high_res_node_ids) && (v in high_res_node_ids)
                 cap = get(phys_line_caps, (u, v), get(phys_line_caps, (v, u), 0.0))
-                fixed_caps[idx] = cap > 0.0 ? cap : 1e6   # 1e6 pu ≈ unconstrained
+                fixed_caps[idx] =
+                    haskey(phys_line_caps, (u, v)) || haskey(phys_line_caps, (v, u)) ? cap :
+                    1e6
             end
         end
         if !isempty(fixed_caps)
@@ -163,12 +120,8 @@ function optimise_equivalent_capacities(
 
     L = 1:length(synth_lines)  # Synthetic line indices
     # Get reduced network bus IDs
-    rn_ids = unique(
-        vcat(
-            ptdf_reduced_results.transaction_from_orig,
-            ptdf_reduced_results.transaction_to_orig,
-        ),
-    )
+    rn_ids = rep_node_ids
+    all_high_res = !isempty(rn_ids) && all(in(high_res_node_ids), rn_ids)
 
     # Filter canonical transactions (from reduced network only).
     # In high-res mode, exclude intra-high-res pairs from the optimisation —
@@ -180,6 +133,7 @@ function optimise_equivalent_capacities(
             (r.transaction_to in rn_ids) &&
             (r.transaction_from < r.transaction_to) &&
             !(
+                !all_high_res &&
                 !isempty(high_res_node_ids) &&
                 (r.transaction_from in high_res_node_ids) &&
                 (r.transaction_to in high_res_node_ids)
@@ -209,6 +163,7 @@ function optimise_equivalent_capacities(
     end
 
     PTDF = Dict{Tuple{Int,Int},Float64}()
+    PTDF_full = Dict{Tuple{Int,Int},Float64}()
     for (t, row) in enumerate(eachrow(ttc_canonical))
         a, b = row.transaction_from, row.transaction_to
         row_indices = get(ptdf_index, (a, b), Int[])
@@ -222,6 +177,7 @@ function optimise_equivalent_capacities(
             if haskey(synth_line_map, lkey)
                 l = synth_line_map[lkey]
                 val = abs(r.PTDF_value)
+                val > 0.0 && (PTDF_full[(t, l)] = val)
                 if val > epsilon
                     PTDF[(t, l)] = val
                 end
@@ -229,11 +185,9 @@ function optimise_equivalent_capacities(
         end
     end
 
-    ttc_orig = ttc_canonical.TTC_pu  # Total TTC (AC + DC) — used for reporting
-
     # Equivalent AC synthetic capacities should fit the AC TTC component. DC
-    # interconnector capacity is exported separately and added back in the
-    # recomputed-TTC calculation below. Optimising the AC network against
+    # interconnector capacity is exported separately and added back when the
+    # equivalent TTC is evaluated below. Optimising the AC network against
     # total AC+DC TTC would overstate the AC synthetic capacities and double
     # count DC capacity for users who consume the exported equivalent network.
     ttc_orig_ac =
@@ -245,6 +199,7 @@ function optimise_equivalent_capacities(
     for t in TR
         relevant_lines_per_txn[t] = [l for l in L if haskey(PTDF, (t, l))]
     end
+    relevant_lines_full_per_txn = [[l for l in L if haskey(PTDF_full, (t, l))] for t in TR]
 
     # Precompute transactions for each line
     relevant_txns_per_line = [Int[] for _ in L]
@@ -256,7 +211,7 @@ function optimise_equivalent_capacities(
 
     # Per-transaction additive DC capacity (0.0 when no DC capacity applies).
     # Optimisation fits the AC component only; this value is added back when
-    # reporting total fitted TTC and recomputed TTC.
+    # the equivalent TTC is evaluated.
     dc_floor = zeros(Float64, length(TR))
     if !isempty(dc_cap_map)
         for (t, row) in enumerate(eachrow(ttc_canonical))
@@ -271,9 +226,10 @@ function optimise_equivalent_capacities(
     # ------------------------------------------------------------
     # 2. MODEL SELECTION AND SETUP
     # ------------------------------------------------------------
-    binding_dict = nothing
+    # Only the capacities are taken from the solver. Its TTC variable is a
+    # lower bound on the network's TTC and is not reported (see docstring).
     if Type == "QP"
-        model, TTC_vals = _solve_qp_model(
+        model, _ = _solve_qp_model(
             ttc_orig_ac,
             synth_lines,
             L,
@@ -286,7 +242,7 @@ function optimise_equivalent_capacities(
         )
 
     elseif Type == "MIQP"
-        model, TTC_vals, binding_dict = _solve_miqp_model(
+        model, _ = _solve_miqp_model(
             ttc_orig_ac,
             synth_lines,
             L,
@@ -295,17 +251,18 @@ function optimise_equivalent_capacities(
             relevant_lines_per_txn,
             relevant_txns_per_line,
             dc_floor;
-            lambda,
-            bigM_factor,
-            max_C_factor,
+            gamma_C,
+            optimizer_factory,
             fixed_caps,
+            ptdf_full = PTDF_full,
+            relevant_lines_full_per_txn = relevant_lines_full_per_txn,
             binding_candidates_per_txn = CONFIG.miqp_binding_candidates_per_txn,
             time_limit_sec = CONFIG.miqp_time_limit_sec,
             mip_rel_gap = CONFIG.miqp_mip_rel_gap,
         )
 
     elseif Type == "LP"
-        model, TTC_vals, binding_dict = _solve_lp_model(
+        model, _ = _solve_lp_model(
             ttc_orig_ac,
             synth_lines,
             L,
@@ -321,50 +278,40 @@ function optimise_equivalent_capacities(
         error("Invalid Type: $Type. Choose from: QP, MIQP, LP")
     end
 
-    ttc_ac_orig =
-        hasproperty(ttc_canonical, :TTC_AC_pu) ? ttc_canonical.TTC_AC_pu :
-        ttc_canonical.TTC_pu
-
-    C_vals = collect(value.(model[:C_eq]))
-    recomputed_ac_vals, recomputed_total_vals, recomputed_binding_dict =
-        _compute_recomputed_ttc(
-            C_vals,
-            synth_lines,
-            TR,
-            PTDF,
-            relevant_lines_per_txn,
-            dc_floor,
-            ttc_ac_orig,
-        )
-
     # ------------------------------------------------------------
-    # 3. EXTRACT BOTH CAPACITIES AND TTC RESULTS
+    # 3. EXTRACT CAPACITIES AND EVALUATE THE EQUIVALENT TTC
     # ------------------------------------------------------------
-
-    # Extract equivalent capacities
-    equivalent_capacities = _extract_capacities(model, synth_lines, L, TR, ttc_orig, Type)
-
-    # Create TTC results directly from optimisation variables
-    ttc_equivalent_results = create_ttc_results_from_optimisation(
-        TTC_vals,
-        recomputed_ac_vals,
-        recomputed_total_vals,
-        ttc_canonical,
-        model = model,
-        Type = Type,
-        synth_lines = synth_lines,
-        binding_dict = recomputed_binding_dict,
+    C_vals = _capacity_values(model)
+    if !isnothing(solver_diagnostics_path) && haskey(model.ext, :solver_diagnostics)
+        CSV.write(solver_diagnostics_path, DataFrame([model.ext[:solver_diagnostics]]))
+    end
+    _, ttc_eq_total, binding_dict = _compute_equivalent_ttc(
+        C_vals,
+        synth_lines,
+        TR,
+        Type == "MIQP" ? PTDF_full : PTDF,
+        Type == "MIQP" ? relevant_lines_full_per_txn : relevant_lines_per_txn,
+        dc_floor,
+        ttc_orig_ac,
     )
+
+    equivalent_capacities = _extract_capacities(model, synth_lines, L, Type)
+    ttc_equivalent_results =
+        create_ttc_results_from_optimisation(ttc_eq_total, ttc_canonical; binding_dict)
+    if Type == "MIQP"
+        calibrated = Set(model.ext[:calibrated_transaction_ids])
+        ttc_equivalent_results[!, :in_calibration] = [t in calibrated for t in TR]
+    end
 
     return equivalent_capacities, ttc_equivalent_results
 end
 
 # ------------------------------------------------------------
-# RECOMPUTED TTC (TTC recomputed from the final exported capacities and
-# reduced-network PTDFs, as opposed to the solver's own fitted variable)
+# EQUIVALENT TTC: TTC_eq[t] = min_l C_eq[l] / |PTDF[t,l]|, evaluated from the
+# final capacities (plus additive DC capacity).
 # ------------------------------------------------------------
 
-function _compute_recomputed_ttc(
+function _compute_equivalent_ttc(
     C_vals::Vector{Float64},
     synth_lines::Vector{Tuple{Int,Int}},
     TR::UnitRange{Int},
@@ -373,16 +320,16 @@ function _compute_recomputed_ttc(
     dc_floor::Vector{Float64},
     ttc_ac_orig::Vector{Float64},
 )
-    recomputed_ac = Vector{Float64}(undef, length(TR))
-    recomputed_total = Vector{Float64}(undef, length(TR))
+    ttc_ac = Vector{Float64}(undef, length(TR))
+    ttc_total = Vector{Float64}(undef, length(TR))
     binding_dict = Dict{Int,Tuple{Int,Int}}()
 
     for t in TR
         if !isfinite(ttc_ac_orig[t])
             # No AC path in the original network. A DC bridge contributes its
             # capacity directly; otherwise the total TTC remains infinite.
-            recomputed_ac[t] = Inf
-            recomputed_total[t] = dc_floor[t] > 0.0 ? dc_floor[t] : Inf
+            ttc_ac[t] = Inf
+            ttc_total[t] = dc_floor[t] > 0.0 ? dc_floor[t] : Inf
             continue
         end
 
@@ -391,8 +338,8 @@ function _compute_recomputed_ttc(
             # Finite AC original TTC but no reduced AC PTDF support. This is an
             # honest unsupported-topology outcome; DC, if present, is still
             # represented by dc_floor in the total TTC.
-            recomputed_ac[t] = 0.0
-            recomputed_total[t] = dc_floor[t]
+            ttc_ac[t] = 0.0
+            ttc_total[t] = dc_floor[t]
             continue
         end
 
@@ -407,14 +354,14 @@ function _compute_recomputed_ttc(
             end
         end
 
-        recomputed_ac[t] = max(0.0, best_val)
-        recomputed_total[t] = recomputed_ac[t] + dc_floor[t]
+        ttc_ac[t] = max(0.0, best_val)
+        ttc_total[t] = ttc_ac[t] + dc_floor[t]
         if best_line != 0
             binding_dict[t] = synth_lines[best_line]
         end
     end
 
-    return recomputed_ac, recomputed_total, binding_dict
+    return ttc_ac, ttc_total, binding_dict
 end
 
 # ------------------------------------------------------------
@@ -469,7 +416,7 @@ function _solve_qp_model(
     #    Transactions with no relevant synthetic line (all PTDFs below epsilon)
     #    have no physical path in the reduced network, so TTC_eq must be pinned
     #    to 0.0. DC capacity is represented separately and added back after the
-    #    AC recomputed TTC is computed.
+    #    equivalent TTC is evaluated.
     for t in TR
         rel_lines = relevant_lines_per_txn[t]
         if isempty(rel_lines)
@@ -500,6 +447,9 @@ function _solve_qp_model(
         println("QP solution status: $status")
     end
 
+    primal_status(model) == MathOptInterface.FEASIBLE_POINT ||
+        error("QP did not find a feasible solution; refusing to export capacities.")
+
     # Extract results. Clamp to zero: transactions pinned by an equality
     # constraint (no relevant synthetic line) can land at a tiny negative
     # value (e.g. -1e-50) from solver tolerance rather than exactly 0.0.
@@ -511,156 +461,91 @@ function _solve_qp_model(
     return model, TTC_vals, binding_dict
 end
 
-# ------------------------------------------------------------
-# MIQP MODEL IMPLEMENTATION
-# ------------------------------------------------------------
-"""
-Linearized MILP formulation using HiGHS that enforces **exactly one binding line** per transaction.
-Objective: minimise sum of absolute TTC errors (L1 norm).
+# MIQP: conservative relative squared-error capacity fitting.
 
-"""
-function _solve_miqp_model_legacy(
-    ttc_orig::Vector{Float64},
-    synth_lines::Vector{Tuple{Int,Int}},
-    L::UnitRange{Int},
-    TR::UnitRange{Int},
-    PTDF::Dict{Tuple{Int,Int},Float64},
-    relevant_lines_per_txn::Vector{Vector{Int}},
-    relevant_txns_per_line::Vector{Vector{Int}},
-    dc_floor::Vector{Float64} = zeros(Float64, length(TR));
-    bigM_factor::Float64 = 5.0,
-    max_C_factor::Float64 = 3.0,
-    fixed_caps::Dict{Int,Float64} = Dict{Int,Float64}(),
-)
-    println(
-        "Setting up linearized MILP model (HiGHS) — exactly one binding line per transaction",
-    )
-
-    # ── Safeguards & big-M computation ──────────────────────────────────────
-    finite_orig = filter(isfinite, ttc_orig)
-    max_ttc = isempty(finite_orig) ? 1.0 : maximum(finite_orig)
-    max_ptdf = isempty(PTDF) ? 1.0 : maximum(abs.(values(PTDF))) + 1e-9
-    bigM_ttc = bigM_factor * max_ttc
-    bigM_Z = bigM_factor * max_ttc * max_ptdf
-    C_ub = max_C_factor * max_ttc * max_ptdf
-
-    # ── Model ───────────────────────────────────────────────────────────────
-    model = Model(HiGHS.Optimizer)
-    set_silent(model)
-
-
-    # ── Variables ───────────────────────────────────────────────────────────
-    @variable(model, 0 ≤ C_eq[l in L] ≤ C_ub)
-
-    # Fix intra-high-res synthetic line capacities to their physical values
-    for (l, cap) in fixed_caps
-        fix(C_eq[l], cap; force = true)
-    end
-
-    @variable(model, TTC_eq[t in TR] ≥ 0)
-
-    # Sparse (t,l) variables — only for relevant pairs
-    Z = Dict{Tuple{Int,Int},VariableRef}()
-    b = Dict{Tuple{Int,Int},VariableRef}()
-
-    for t in TR, l in relevant_lines_per_txn[t]
-        Z[(t, l)] = @variable(model, lower_bound = 0.0, base_name = "Z[$t,$l]")
-        b[(t, l)] = @variable(model, binary = true, base_name = "b[$t,$l]")
-    end
-    # Register the binding-indicator variables on the model so the caller can
-    # recompute the binding dictionary after any later solve without it going stale.
-    model[:b_bind] = b
-
-    @variable(model, V_abs[t in TR] ≥ 0)
-
-    # ── Objective ───────────────────────────────────────────────────────────
-    @objective(model, Min, sum(V_abs[t] for t in TR))
-
-    # ── Constraints ─────────────────────────────────────────────────────────
-
-    # A. L1 error linearisation (skip cross-island transactions where TTC_orig = Inf)
-    for t in TR
-        if isfinite(ttc_orig[t])
-            @constraint(model, V_abs[t] ≥ TTC_eq[t] - ttc_orig[t])
-            @constraint(model, V_abs[t] ≥ ttc_orig[t] - TTC_eq[t])
+function _conservative_capacity_start(ttc_orig, C_ref, Tf, PTDF, relevant_lines_per_txn)
+    envelope =
+        [minimum(C_ref[l] / PTDF[(t, l)] for l in relevant_lines_per_txn[t]) for t in Tf]
+    alpha = min(1.0, minimum(ttc_orig[t] / envelope[i] for (i, t) in enumerate(Tf)))
+    best_ttc = alpha .* envelope
+    # Bound memory for larger cases. The scalar start remains available.
+    if length(Tf) * length(C_ref) <= 5_000_000
+        requirement = zeros(length(Tf), length(C_ref))
+        for (i, t) in enumerate(Tf), l in relevant_lines_per_txn[t]
+            requirement[i, l] = PTDF[(t, l)] * ttc_orig[t]
         end
-    end
-
-    # B. TTC definition = sum (allocated capacity / PTDF).
-    #    No relevant line -> pin to the additive DC value used by this legacy
-    #    formulation (0.0 if none).
-    for t in TR
-        rel_lines = relevant_lines_per_txn[t]
-        if isempty(rel_lines)
-            @constraint(model, TTC_eq[t] == dc_floor[t])
-        else
-            @constraint(
-                model,
-                TTC_eq[t] == sum(Z[(t, l)] / PTDF[(t, l)] for l in rel_lines)
-            )
-        end
-    end
-
-    # C. Z[t,l] ≤ C_eq[l]   (always respected)
-    for (t, l) in keys(Z)
-        @constraint(model, Z[(t, l)] ≤ C_eq[l])
-    end
-
-    # D. Exactly-one-binding logic + Z = C_eq when binding
-    for t in TR
-        rel_lines = relevant_lines_per_txn[t]
-        if !isempty(rel_lines)
-            @constraint(model, sum(b[(t, l)] for l in rel_lines) == 1)
-
-            for l in rel_lines
-                @constraint(model, Z[(t, l)] ≤ bigM_Z * b[(t, l)])
-                @constraint(model, Z[(t, l)] ≥ C_eq[l] - bigM_Z * (1 - b[(t, l)]))
+        ratios = envelope ./ ttc_orig[Tf]
+        # Each step makes the most overestimated transaction conservative by
+        # lowering one branch. Choose the branch with the smallest resulting
+        # total squared underestimation. Lowering capacities never uncovers a
+        # previously conservative transaction, so at most |Tf| steps are needed.
+        trial = similar(ratios)
+        for _ in eachindex(Tf)
+            i = argmax(ratios)
+            ratios[i] <= 1.0 + 1e-10 && break
+            best_score, best_line = Inf, 0
+            for l in relevant_lines_per_txn[Tf[i]]
+                score = 0.0
+                c = requirement[i, l]
+                for j in eachindex(Tf)
+                    ratio =
+                        requirement[j, l] > 0 ? min(ratios[j], c / requirement[j, l]) :
+                        ratios[j]
+                    score += min(ratio - 1.0, 0.0)^2
+                end
+                if score < best_score
+                    best_score, best_line = score, l
+                end
             end
+            c = requirement[i, best_line]
+            for j in eachindex(Tf)
+                trial[j] =
+                    requirement[j, best_line] > 0 ?
+                    min(ratios[j], c / requirement[j, best_line]) : ratios[j]
+            end
+            ratios .= trial
+        end
+        if maximum(ratios) <= 1.0 + 1e-9 &&
+           sum((ratios .- 1.0) .^ 2) < sum((best_ttc ./ ttc_orig[Tf] .- 1.0) .^ 2)
+            best_ttc = min.(ratios, 1.0) .* ttc_orig[Tf]
         end
     end
-
-    # E. Physical upper bounds on TTC
-    for t in TR, l in relevant_lines_per_txn[t]
-        @constraint(model, TTC_eq[t] ≤ C_eq[l] / PTDF[(t, l)])
+    capacities = zeros(length(C_ref))
+    for (i, t) in enumerate(Tf), l in relevant_lines_per_txn[t]
+        capacities[l] = max(capacities[l], PTDF[(t, l)] * best_ttc[i])
     end
-
-    # F. Numerical stability bound
-    for t in TR
-        @constraint(model, TTC_eq[t] ≤ bigM_ttc)
-    end
-
-    # ── Solve ───────────────────────────────────────────────────────────────
-    println("Solving MILP with HiGHS...")
-    optimize!(model)
-
-    status = termination_status(model)
-    println("MILP status: $status")
-
-    if status ∉ [OPTIMAL, LOCALLY_SOLVED, ALMOST_OPTIMAL, ALMOST_LOCALLY_SOLVED]
-        @warn "Unexpected termination status: $status"
-        if primal_status(model) == FEASIBLE_POINT
-            println("  → but a feasible solution was found")
-        end
-    end
-
-    # ── Results ─────────────────────────────────────────────────────────────
-    TTC_vals = [max(0.0, value(TTC_eq[t])) for t in TR]
-    binding_dict = _extract_miqp_binding(model, relevant_lines_per_txn, synth_lines, TR)
-
-    return model, TTC_vals, binding_dict
+    return capacities, Dict(t => best_ttc[i] for (i, t) in enumerate(Tf))
 end
 
 """
-Binding-line MILP solved by HiGHS.
+If branch l binds transaction t, C_l <= p[t,l] * target[t]. Every transaction
+s loading l then has TTC[s]/target[s] <= (p[t,l]*target[t])/(p[s,l]*target[s]).
+Summing the unavoidable squared shortfalls gives an objective lower bound for
+that binding choice. Sorted suffix sums evaluate all these bounds efficiently.
+"""
+function _binding_objective_bounds(ttc_orig, Tf, PTDF, relevant_txns_per_line)
+    calibrated = Set(Tf)
+    bounds = Dict{Tuple{Int,Int},Float64}()
+    for (l, transactions) in enumerate(relevant_txns_per_line)
+        entries = sort(
+            [(PTDF[(t, l)] * ttc_orig[t], t) for t in transactions if t in calibrated];
+            by = first,
+        )
+        inverse_sum, inverse_square_sum = 0.0, 0.0
+        m = length(entries)
+        for k = m:-1:1
+            q, t = entries[k]
+            bounds[(t, l)] = max(0.0, (m - k) - 2q * inverse_sum + q^2 * inverse_square_sum)
+            inverse_sum += 1 / q
+            inverse_square_sum += 1 / q^2
+        end
+    end
+    return bounds
+end
 
-This method supersedes the older Z-allocation MILP above. It fits the AC
-recomputed TTC directly:
+"""
+Literal binding-branch MIQP, solved directly with the configured MIQP solver.
 
-    TTC_eq[t] = min_l C_eq[l] / abs(PTDF[t,l])
-
-Physical upper-bound constraints are enforced for every relevant
-(transaction, line) pair; binary binding choices are restricted to likely
-limiting lines for scalability.
 """
 function _solve_miqp_model(
     ttc_orig::Vector{Float64},
@@ -671,127 +556,204 @@ function _solve_miqp_model(
     relevant_lines_per_txn::Vector{Vector{Int}},
     relevant_txns_per_line::Vector{Vector{Int}},
     dc_floor::Vector{Float64} = zeros(Float64, length(TR));
-    lambda::Float64 = CONFIG.lambda,
-    bigM_factor::Float64 = 5.0,
-    max_C_factor::Float64 = 3.0,
+    gamma_C::Float64 = CONFIG.miqp_gamma_C,
+    optimizer_factory = CONFIG.miqp_optimizer,
     fixed_caps::Dict{Int,Float64} = Dict{Int,Float64}(),
+    ptdf_full::Dict{Tuple{Int,Int},Float64} = PTDF,
+    relevant_lines_full_per_txn::Vector{Vector{Int}} = relevant_lines_per_txn,
+    calibrated_mask::AbstractVector{Bool} = trues(length(TR)),
     binding_candidates_per_txn::Int = CONFIG.miqp_binding_candidates_per_txn,
     time_limit_sec::Float64 = CONFIG.miqp_time_limit_sec,
     mip_rel_gap::Float64 = CONFIG.miqp_mip_rel_gap,
+    safe_binding_screening::Bool = CONFIG.miqp_safe_binding_screening,
 )
-    println("Setting up binding-line MILP model (HiGHS) -- recomputed TTC fit")
+    println("Setting up binding-line MIQP model...")
+    gamma_C >= 1.0 || throw(ArgumentError("gamma_C must be at least 1"))
+    binding_candidates_per_txn >= 0 ||
+        throw(ArgumentError("Use 0 for all binding candidates, or a positive count"))
 
-    finite_orig = filter(isfinite, ttc_orig)
-    max_ttc = isempty(finite_orig) ? 1.0 : maximum(finite_orig)
+    is_optimised(l) = !haskey(fixed_caps, l)
 
-    required_cap = zeros(Float64, length(L))
-    for t in TR
-        isfinite(ttc_orig[t]) || continue
-        for l in relevant_lines_per_txn[t]
-            required_cap[l] = max(required_cap[l], ttc_orig[t] * PTDF[(t, l)])
+    # ------------------------------------------------------------------
+    # Calibration set T_f (Section III-E, "not all transactions are
+    # calibrated"): finite, strictly positive AC target, and loads at
+    # least one optimisable branch.
+    # ------------------------------------------------------------------
+    Tf = [
+        t for t in TR if isfinite(ttc_orig[t]) &&
+            ttc_orig[t] > 0.0 &&
+            calibrated_mask[t] &&
+            any(is_optimised, relevant_lines_per_txn[t])
+    ]
+    Tf_set = Set(Tf)
+    # Empty calibration sets still export fixed physical or DC-only networks.
+
+    # ------------------------------------------------------------------
+    # Reference capacity C_ref[l]: largest requirement any calibrated
+    # transaction places on branch l at its ORIGINAL target. Evaluated in
+    # a single pass over the PTDF data.
+    # ------------------------------------------------------------------
+    C_ref = zeros(Float64, length(L))
+    for t in Tf, l in relevant_lines_per_txn[t]
+        C_ref[l] = max(C_ref[l], PTDF[(t, l)] * ttc_orig[t])
+    end
+
+    # Capacity bound / big-M. Fixed branches use their fixed rating
+
+    C_max = Dict{Int,Float64}()
+    M = Dict{Int,Float64}()
+    for l in L
+        if haskey(fixed_caps, l)
+            M[l] = fixed_caps[l]
+        else
+            # Tiny floor keeps a branch untouched by any calibrated
+            # transaction well-posed rather than pinned to exactly zero.
+            C_max[l] = gamma_C * max(C_ref[l], 1e-8)
+            M[l] = C_max[l]
         end
     end
-    for (l, cap) in fixed_caps
-        required_cap[l] = max(required_cap[l], cap)
+
+    start_caps, start_ttc = nothing, nothing
+    start_objective = Inf
+    binding_bounds = Dict{Tuple{Int,Int},Float64}()
+    if isempty(fixed_caps) && binding_candidates_per_txn == 0 && !isempty(Tf)
+        start_caps, start_ttc =
+            _conservative_capacity_start(ttc_orig, C_ref, Tf, PTDF, relevant_lines_per_txn)
+        start_objective = sum((start_ttc[t] / ttc_orig[t] - 1)^2 for t in Tf)
+        if safe_binding_screening
+            binding_bounds =
+                _binding_objective_bounds(ttc_orig, Tf, PTDF, relevant_txns_per_line)
+        end
     end
 
-    C_ub = [
-        max(max_C_factor * max(required_cap[l], 1e-8), get(fixed_caps, l, 0.0), 1e-6)
-        for l in L
-    ]
-    bigM_ttc = bigM_factor * max(max_ttc, 1e-6)
-
-    model = Model(HiGHS.Optimizer)
+    model = Model(optimizer_factory)
+    model.ext[:calibrated_transaction_ids] = Tf
+    name = solver_name(model)
     set_silent(model)
     time_limit_sec > 0.0 && set_time_limit_sec(model, time_limit_sec)
-    set_optimizer_attribute(model, "mip_rel_gap", mip_rel_gap)
-
-    @variable(model, 0 <= C_eq[l in L] <= C_ub[l])
-    for (l, cap) in fixed_caps
-        fix(C_eq[l], cap; force = true)
+    gap_attribute = MathOptInterface.RelativeGapTolerance()
+    if MathOptInterface.supports(JuMP.backend(model), gap_attribute)
+        set_optimizer_attribute(model, gap_attribute, mip_rel_gap)
+    else
+        @warn "$name does not accept a relative gap tolerance; set it through " *
+              "CONFIG.miqp_optimizer_attributes."
+    end
+    # A tight feasibility tolerance keeps the big-M binding equalities accurate
+    # enough for the post-solve consistency check. For other solvers, set the
+    # equivalent tolerance through CONFIG.miqp_optimizer_attributes.
+    occursin("SCIP", uppercase(name)) &&
+        set_optimizer_attribute(model, "numerics/feastol", 1e-9)
+    for (attribute, setting) in CONFIG.miqp_optimizer_attributes
+        set_optimizer_attribute(model, attribute, setting)
     end
 
-    @variable(model, 0 <= TTC_eq[t in TR] <= bigM_ttc)
-    @variable(model, V_abs[t in TR] >= 0)
+    # C_k, (31f)
+    @variable(model, C_eq[l in L] >= 0)
+    for l in L
+        if haskey(fixed_caps, l)
+            fix(C_eq[l], fixed_caps[l]; force = true)
+        else
+            set_upper_bound(C_eq[l], C_max[l])
+        end
+    end
 
+    # TTC_eq[t], bounded per-transaction by the original AC target.
+    # Transactions outside T_f carry no AC fitting target here; their
+    # true AC transfer capacity is recovered downstream from the final
+    # exported capacities, independent of this variable.
+    @variable(model, TTC_eq[t in TR] >= 0)
+    for t in TR
+        if t in Tf_set
+            set_upper_bound(TTC_eq[t], ttc_orig[t])
+        else
+            fix(TTC_eq[t], 0.0; force = true)
+        end
+    end
+
+    # Binary binding indicators b[t,l], pruned to kappa candidates
+    # per transaction. Candidates are drawn from the FULL
+    # relevant set K_t (fixed and optimisable branches alike).
     b = Dict{Tuple{Int,Int},VariableRef}()
     binding_candidates = Dict{Int,Vector{Int}}()
-    for t in TR
+    for t in Tf
         rel_lines = relevant_lines_per_txn[t]
-        if isempty(rel_lines) || !isfinite(ttc_orig[t])
-            binding_candidates[t] = Int[]
-            continue
-        end
-
-        candidates = if length(rel_lines) <= binding_candidates_per_txn
-            rel_lines
-        else
-            sorted = sort(rel_lines; by = l -> required_cap[l] / max(PTDF[(t, l)], 1e-12))
-            sorted[1:binding_candidates_per_txn]
+        candidates =
+            if binding_candidates_per_txn == 0 ||
+               length(rel_lines) <= binding_candidates_per_txn
+                rel_lines
+            else
+                sorted = sort(rel_lines; by = l -> C_ref[l] / max(PTDF[(t, l)], 1e-12))
+                sorted[1:binding_candidates_per_txn]
+            end
+        if !isempty(binding_bounds)
+            # The margin retains borderline choices despite floating-point
+            # cancellation in suffix sums; this is not heuristic top-k pruning.
+            candidates = filter(
+                l ->
+                    binding_bounds[(t, l)] <=
+                    start_objective + 1e-6 * max(1.0, start_objective),
+                candidates,
+            )
+            isempty(candidates) &&
+                error("Objective screening removed every binding choice for transaction $t")
         end
         binding_candidates[t] = candidates
-
         for l in candidates
             b[(t, l)] = @variable(model, binary = true, base_name = "b[$t,$l]")
         end
     end
     model[:b_bind] = b
 
-    @objective(
-        model,
-        Min,
-        sum(V_abs[t] for t in TR if isfinite(ttc_orig[t])) +
-        lambda * sum(C_eq[l] for l in L)
-    )
+    # Objective: normalised squared mismatch over T_f only.
+    @objective(model, Min, sum((TTC_eq[t] / ttc_orig[t] - 1)^2 for t in Tf))
 
-    for t in TR
-        rel_lines = relevant_lines_per_txn[t]
-        if isempty(rel_lines) || !isfinite(ttc_orig[t])
-            @constraint(model, TTC_eq[t] == 0.0)
-            continue
-        end
+    # Constraint: thermal feasibility over the full relevant set K_t.
+    for t in Tf, l in relevant_lines_per_txn[t]
+        @constraint(model, PTDF[(t, l)] * TTC_eq[t] <= C_eq[l])
+    end
 
-        @constraint(model, V_abs[t] >= TTC_eq[t] - ttc_orig[t])
-        @constraint(model, V_abs[t] >= ttc_orig[t] - TTC_eq[t])
-
-        for l in rel_lines
-            @constraint(model, C_eq[l] >= PTDF[(t, l)] * TTC_eq[t])
-        end
-
+    # Constraint: exactly one binding branch, converted to an
+    # equality via the branch-wise big-M M[l].
+    for t in Tf
         candidates = binding_candidates[t]
-        if isempty(candidates)
-            @constraint(model, TTC_eq[t] == 0.0)
-        else
-            @constraint(model, sum(b[(t, l)] for l in candidates) == 1)
-            for l in candidates
-                @constraint(
-                    model,
-                    C_eq[l] <= PTDF[(t, l)] * TTC_eq[t] + C_ub[l] * (1 - b[(t, l)])
-                )
+        @constraint(model, sum(b[(t, l)] for l in candidates) == 1)
+        for l in candidates
+            @constraint(model, C_eq[l] - PTDF[(t, l)] * TTC_eq[t] <= M[l] * (1 - b[(t, l)]))
+        end
+    end
+
+    # A complete feasible start for the unrestricted, all-optimised model.
+    # Scale the target envelope until every recomputed TTC is conservative,
+    # then close capacities over those TTCs. Unlike (C_ref, original TTC),
+    # this start satisfies the binding equalities as well as thermal limits.
+    if !isnothing(start_caps)
+        for l in L
+            set_start_value(C_eq[l], start_caps[l])
+        end
+        for t in Tf
+            set_start_value(TTC_eq[t], start_ttc[t])
+            binding = argmin(l -> start_caps[l] / PTDF[(t, l)], relevant_lines_per_txn[t])
+            for l in binding_candidates[t]
+                set_start_value(b[(t, l)], l == binding ? 1.0 : 0.0)
             end
         end
-    end
-
-    for l in L
-        set_start_value(C_eq[l], min(required_cap[l], C_ub[l]))
-    end
-    for t in TR
-        if isfinite(ttc_orig[t])
-            set_start_value(TTC_eq[t], min(ttc_orig[t], bigM_ttc))
-        end
+        println(
+            "Feasible envelope warm start: relative squared error = ",
+            sum((start_ttc[t] / ttc_orig[t] - 1)^2 for t in Tf),
+        )
     end
 
     n_binaries = length(b)
-    n_relevant = sum(length(relevant_lines_per_txn[t]) for t in TR)
+    n_relevant = sum((length(relevant_lines_per_txn[t]) for t in Tf); init = 0)
     println(
-        "Solving MILP with HiGHS ($(length(TR)) transactions, " *
+        "Solving MIQP with $name ($(length(Tf))/$(length(TR)) calibrated transactions, " *
         "$(length(L)) lines, $n_relevant physical constraints, " *
         "$n_binaries binding binaries)...",
     )
     optimize!(model)
 
     status = termination_status(model)
-    println("MILP status: $status")
+    println("MIQP status: $status")
 
     usable_status = status in [
         MathOptInterface.OPTIMAL,
@@ -799,28 +761,107 @@ function _solve_miqp_model(
         MathOptInterface.TIME_LIMIT,
     ]
     if !usable_status
-        @warn "Unexpected MILP termination status: $status"
+        @warn "Unexpected MIQP termination status: $status"
     end
     if primal_status(model) != MathOptInterface.FEASIBLE_POINT
-        error("MILP did not find a feasible recomputed-TTC solution.")
+        error("MIQP did not find a feasible solution.")
     end
+    model.ext[:solver_diagnostics] = (
+        solver = name,
+        termination_status = string(status),
+        primal_status = string(primal_status(model)),
+        objective = objective_value(model),
+        objective_bound = objective_bound(model),
+        relative_gap = relative_gap(model),
+        solve_time_sec = solve_time(model),
+        time_limit_sec = time_limit_sec,
+        requested_relative_gap = mip_rel_gap,
+        calibrated_transactions = length(Tf),
+        synthetic_lines = length(L),
+        binding_binaries = n_binaries,
+        binding_candidates_per_txn = binding_candidates_per_txn,
+        safe_binding_screening = safe_binding_screening,
+        relevant_binding_choices_before_screening = n_relevant,
+        initial_feasible_objective = start_objective,
+        # Makes the MIQP's margin over the greedy conservative construction
+        # explicit. A small margin does not invalidate the model, but the value
+        # the MIQP adds is then the certified optimality gap rather than a large
+        # objective improvement, and should be reported as such.
+        improvement_over_heuristic_start_pct = isfinite(start_objective) &&
+                                               start_objective > 0.0 ?
+                                               100 * (
+            start_objective - objective_value(model)
+        ) / start_objective : NaN,
+        errors_one_sided_by_construction = true,
+        calibration_subset_active = !all(calibrated_mask),
+    )
+    println("Capacity-fit diagnostics: ", model.ext[:solver_diagnostics])
+
+    TTC_star = [max(0.0, value(TTC_eq[t])) for t in TR]
+
+    # ------------------------------------------------------------------
+    deterministic_caps = collect(value.(C_eq))
+    for l in L
+        haskey(fixed_caps, l) && continue
+        # Close over ptdf_full rather than the epsilon-filtered set. A branch
+        # whose sensitivities all sit below epsilon is weakly coupled, not
+        # absent: maximising over the filtered set returns an empty maximum and
+        # exports 0 MW, which blocks that branch for any consumer applying a
+        # tighter cutoff. The full closure gives it the smallest rating that
+        # supports every fitted transfer and cannot change any TTC, because
+        # C_l >= g_lt * TTC_t then holds for every loaded transaction.
+        best = 0.0
+        loaded = false
+        for t in Tf
+            g = get(ptdf_full, (t, l), 0.0)
+            if g > 0.0
+                best = max(best, g * TTC_star[t])
+                loaded = true
+            end
+        end
+        deterministic_caps[l] = loaded ? best : C_ref[l]
+    end
+    n_zero = count(l -> !haskey(fixed_caps, l) && deterministic_caps[l] <= 0.0, L)
+    n_zero == 0 || @warn "$n_zero synthetic branches carry no calibrated load even at " *
+          "full PTDF resolution and are exported with a zero rating. Review whether they " *
+          "should be dropped from the equivalent together with their admittance."
+
+    # Do not solve a second fixed-capacity problem: its OPTIMAL status says
+    # nothing about the original MIQP gap and would reset the time allowance.
+    #
+    # Verify the EXPORTED artifact over the full sensitivity set a downstream
+    # user would apply, not merely over the epsilon-filtered fit set. Checking
+    # only the fit set is what allowed a zero-rated weakly-coupled branch to
+    # pass validation while blocking transfers for any tighter cutoff.
+    for t in Tf
+        physical = minimum(
+            deterministic_caps[l] / ptdf_full[(t, l)] for
+            l in relevant_lines_full_per_txn[t]
+        )
+        isapprox(physical, TTC_star[t]; atol = 1e-6, rtol = 1e-6) || error(
+            "Binding consistency failed for transaction $t: fitted=$(TTC_star[t]), recomputed=$physical",
+        )
+        physical <= ttc_orig[t] + 1e-6 * max(1.0, ttc_orig[t]) ||
+            error("Conservativeness violated for transaction $t")
+    end
+    model.ext[:deterministic_capacities] = deterministic_caps
 
     TTC_vals = [max(0.0, value(TTC_eq[t])) for t in TR]
-    binding_dict = _extract_miqp_binding(model, relevant_lines_per_txn, synth_lines, TR)
+    binding_dict = _extract_miqp_binding(model, relevant_lines_per_txn, synth_lines, Tf)
 
     return model, TTC_vals, binding_dict
 end
 
 # ------------------------------------------------------------
-# Recompute the MIQP/MILP binding-line dictionary from the current binary
+# Recompute the MIQP binding-line dictionary from the current binary
 # variable values so the exported "limiting synthetic line" reflects the
-# final MILP solution.
+# final MIQP solution.
 # ------------------------------------------------------------
 function _extract_miqp_binding(
     model::Model,
     relevant_lines_per_txn::Vector{Vector{Int}},
     synth_lines::Vector{Tuple{Int,Int}},
-    TR::UnitRange{Int},
+    TR::AbstractVector{<:Integer},
 )
     b = model[:b_bind]
     binding_dict = Dict{Int,Tuple{Int,Int}}()  # t → (from_bus, to_bus)
@@ -848,89 +889,6 @@ end
 # ------------------------------------------------------------
 # LP MODEL IMPLEMENTATION
 # ------------------------------------------------------------
-
-function _solve_lp_model_legacy(
-    ttc_orig::Vector{Float64},
-    synth_lines::Vector{Tuple{Int,Int}},
-    L::UnitRange{Int},
-    TR::UnitRange{Int},
-    PTDF::Dict{Tuple{Int,Int},Float64},
-    relevant_lines_per_txn::Vector{Vector{Int}},
-    lambda::Float64,
-    dc_floor::Vector{Float64} = zeros(Float64, length(TR));
-    fixed_caps::Dict{Int,Float64} = Dict{Int,Float64}(),
-)
-    println("Setting up LP model...")
-
-    # Use Ipopt for LP
-    model = Model(Ipopt.Optimizer)
-    set_silent(model)
-
-    # Variables
-    @variable(model, C_eq[l in L] >= 0)           # Equivalent capacities
-    @variable(model, TTC_eq[t in TR] >= 0)        # Equivalent TTCs
-
-    # Fix intra-high-res synthetic line capacities to their physical values
-    for (l, cap) in fixed_caps
-        fix(C_eq[l], cap; force = true)
-    end
-
-    # Objective: Maximise total TTC (subject to TTC_eq ≤ TTC_orig), with a small
-    # penalty on capacity. Without this, C_eq only appears in one-directional
-    # constraints and is otherwise free — any sufficiently large C_eq is equally
-    # optimal, so the reported capacities are arbitrary/solver-dependent. The
-    # lambda penalty (same regularisation parameter used by QP/MIQP) drives C_eq
-    # to the smallest value that still supports the maximised TTC.
-    @objective(model, Max, sum(TTC_eq[t] for t in TR) - lambda * sum(C_eq[l] for l in L))
-
-    # Constraints
-
-    # 1. TTC cannot exceed original TTC (skip cross-island transactions where TTC_orig = Inf)
-    @constraint(model, [t in TR; isfinite(ttc_orig[t])], TTC_eq[t] <= ttc_orig[t])
-
-    # 2. Physical constraints: TTC cannot exceed capacity/PTDF ratio.
-    #    Transactions with no relevant synthetic line have no AC path in the
-    #    reduced network, so this legacy formulation pins TTC_eq to the
-    #    additive DC value (0.0 when no DC capacity applies).
-    for t in TR
-        rel_lines = relevant_lines_per_txn[t]
-        if isempty(rel_lines)
-            @constraint(model, TTC_eq[t] == dc_floor[t])
-        else
-            for l in rel_lines
-                @constraint(model, TTC_eq[t] <= C_eq[l] / PTDF[(t, l)])
-            end
-        end
-    end
-
-    # Solve
-    optimize!(model)
-
-    status = termination_status(model)
-    println("LP status: $status")
-
-    if status in (
-        MathOptInterface.INFEASIBLE,
-        MathOptInterface.LOCALLY_INFEASIBLE,
-        MathOptInterface.INFEASIBLE_OR_UNBOUNDED,
-    )
-        error(
-            "LP solve reported $status — refusing to export meaningless values. " *
-            "Check for conflicting AC capacity constraints or inconsistent TTC targets.",
-        )
-    elseif status != MathOptInterface.OPTIMAL
-        println("LP solution status: $status")
-        if primal_status(model) == MathOptInterface.FEASIBLE_POINT
-            println("But found a feasible solution")
-        end
-    end
-
-    # Extract results
-    TTC_vals = max.(0.0, collect(value.(TTC_eq)))
-    binding_dict = _extract_lp_binding(model, relevant_lines_per_txn, synth_lines, PTDF, TR)
-
-    return model, TTC_vals, binding_dict
-end
 
 function _solve_lp_model(
     ttc_orig::Vector{Float64},
@@ -1027,20 +985,15 @@ end
 # RESULT EXTRACTION FUNCTION
 # ------------------------------------------------------------
 
-function _extract_capacities(
-    model::Model,
-    synth_lines,
-    L,
-    TR,
-    ttc_orig,
-    Type = CONFIG.optimisation_type,
-)
+function _capacity_values(model::Model)
+    return haskey(model.ext, :deterministic_capacities) ?
+           model.ext[:deterministic_capacities] : max.(0.0, collect(value.(model[:C_eq])))
+end
+
+function _extract_capacities(model::Model, synth_lines, L, Type = CONFIG.optimisation_type)
     if isempty(L) || length(synth_lines) == 0
         println("\n=== $Type Optimisation Results ===")
-        println(
-            "No lines in reduced network (likely allow_virtual_lines=false + no direct physical links between rep nodes)",
-        )
-        println("→ Returning empty equivalent capacities DataFrame")
+        println("No lines in reduced network → returning empty equivalent capacities")
         return DataFrame(
             synth_line_from = Int[],
             synth_line_to = Int[],
@@ -1048,7 +1001,7 @@ function _extract_capacities(
         )
     end
 
-    C_vals = value.(model[:C_eq])
+    C_vals = _capacity_values(model)
 
     println("\n=== $Type Optimisation Results ===")
     println("C_eq statistics:")
@@ -1065,87 +1018,52 @@ function _extract_capacities(
 end
 
 """
-    create_ttc_results_from_optimisation(
-    ttc_vals::Vector{Float64},
-    ttc_canonical::DataFrame;
-    model=model,
-    Type = CONFIG.optimisation_type,
-    synth_lines::Vector{Tuple{Int,Int}} = Tuple{Int,Int}[],
-    binding_dict::Union{Dict,Nothing} = nothing
-    )
+    create_ttc_results_from_optimisation(ttc_eq_total, ttc_canonical; binding_dict)
 
-Create TTC results directly from optimisation variables.
-
+Build the equivalent-TTC result table from the TTC of the exported network
+(`TTC_eq = min C_eq/|PTDF| + DC`, see `_compute_equivalent_ttc`) and the
+limiting synthetic line of each transaction.
 """
 function create_ttc_results_from_optimisation(
-    ttc_vals::Vector{Float64},
-    ttc_recomputed_ac::Vector{Float64},
-    ttc_recomputed_total::Vector{Float64},
+    ttc_eq_total::Vector{Float64},
     ttc_canonical::DataFrame;
-    model = model,
-    Type = CONFIG.optimisation_type,
-    synth_lines::Vector{Tuple{Int,Int}} = Tuple{Int,Int}[],
-    binding_dict::Union{Dict,Nothing} = nothing,
+    binding_dict::Dict{Int,Tuple{Int,Int}} = Dict{Int,Tuple{Int,Int}}(),
 )
-
-    n_txn = length(ttc_vals)
+    n_txn = length(ttc_eq_total)
     @assert n_txn == nrow(ttc_canonical) "TTC size mismatch"
-    @assert length(ttc_recomputed_total) == n_txn "Recomputed TTC size mismatch"
 
-    opt_total = [
-        isfinite(ttc_canonical.TTC_AC_pu[t]) ?
-        ttc_vals[t] + ttc_canonical.TTC_DC_pu[t] :
-        (ttc_canonical.TTC_DC_pu[t] > 0.0 ? ttc_canonical.TTC_DC_pu[t] : Inf) for
-        t = 1:n_txn
-    ]
-
-    mode = uppercase(String(Type))
-    physical_primary = mode in ("LP", "MIQP", "MILP")
-    primary_total = physical_primary ? ttc_recomputed_total : opt_total
-    primary_source = physical_primary ? "recomputed" : "fitted_optimisation"
-
-    # Base results (common for all types)
     ttc_results = DataFrame(
         transaction_from = ttc_canonical.transaction_from,
         transaction_to = ttc_canonical.transaction_to,
-        TTC_Equivalent_pu = primary_total,
+        TTC_Equivalent_pu = ttc_eq_total,
     )
 
     binding_from = fill(0, n_txn)
     binding_to = fill(0, n_txn)
-    if isnothing(binding_dict)
-        @warn "Recomputed-TTC binding dictionary was not provided to the result extractor."
-    else
-        for t = 1:n_txn
-            if haskey(binding_dict, t)
-                from, to = binding_dict[t]
-                binding_from[t] = from
-                binding_to[t] = to
-            end
-        end
+    for (t, (from, to)) in binding_dict
+        binding_from[t] = from
+        binding_to[t] = to
     end
     ttc_results[!, :limiting_synth_line_from] = binding_from
     ttc_results[!, :limiting_synth_line_to] = binding_to
 
-    # Calculate error statistics (finite-TTC transactions only)
-    err_primary = primary_total .- ttc_canonical.TTC_pu
-    finite_mask = isfinite.(ttc_canonical.TTC_pu)
-    err_primary_finite = err_primary[finite_mask]
-    println("\nTTC matching accuracy ($(sum(finite_mask)) finite-TTC transactions):")
-    println("  Primary TTC source            = $primary_source")
-    println(
-        "  Primary max |error|           = $(round(maximum(abs.(err_primary_finite)); digits=6)) pu",
-    )
-    println(
-        "  Primary mean |error|          = $(round(mean(abs.(err_primary_finite)); digits=6)) pu",
-    )
+    # Error statistics over transactions with a finite original TTC
+    err = ttc_eq_total .- ttc_canonical.TTC_pu
+    finite_err = err[isfinite.(ttc_canonical.TTC_pu)]
+    println("\nTTC matching accuracy ($(length(finite_err)) finite-TTC transactions):")
+    if isempty(finite_err)
+        println("  No finite-TTC transactions to compare.")
+    else
+        println("  Max |error|  = $(round(maximum(abs, finite_err); digits=6)) pu")
+        println("  Mean |error| = $(round(mean(abs, finite_err); digits=6)) pu")
+    end
 
     println("\nSample TTC comparisons (first 5 transactions):")
     for t = 1:min(5, n_txn)
         println(
             "  T$t: Original=$(round(ttc_canonical.TTC_pu[t]; digits=6)), " *
-            "Equivalent=$(round(primary_total[t]; digits=6)), " *
-            "Primary error=$(round(err_primary[t]; digits=6))",
+            "Equivalent=$(round(ttc_eq_total[t]; digits=6)), " *
+            "Error=$(round(err[t]; digits=6))",
         )
     end
 
