@@ -20,3 +20,29 @@ Fork → Branch → Code → Push → Pull → Squash & Merge
 4. Push to your fork
 5. Create a pull request from your fork to the main repository
 6. (After review) Squash and merge
+
+## Validation
+
+Run `julia --project=. test/runtests.jl` from the repository root. Tests write
+case-study outputs to temporary directories and do not overwrite the saved
+reference CSVs or plots in `test/outputs`. Plotting is exercised by default;
+set the environment variable `ENR_TEST_PLOTS=false` to run mathematical and
+export checks without generating plots. All test files are collected even when
+a case study fails.
+
+After a change that affects results, refresh the saved reference outputs by
+running the tests with `ENR_UPDATE_REFERENCE_OUTPUTS=true` (and plotting
+enabled). The reference case studies then write to `test/outputs/<case>`
+instead of temporary directories; review the changes before committing them.
+
+The European network in `test/inputs/case_EU` is not part of the batch suite
+because of its run time, and its outputs are not versioned (`test/outputs/case_EU`
+is ignored by git). After a change that affects results, run it manually as
+described in the usage guide and check the reported TTC errors.
+
+The batch suite verifies exported-network consistency, valid capacities and
+the MIQP's binding and conservativeness constraints. It reports maximum
+and mean TTC errors without a fixed accuracy threshold: aggressive reduction
+necessarily trades detail for size, and one rating per equivalent branch
+cannot generally reproduce every original transfer limit. Assess errors for
+the intended study alongside solver status and optimality gap.

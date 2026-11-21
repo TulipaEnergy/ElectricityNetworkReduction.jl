@@ -6,13 +6,13 @@
 Complete eleven-step network reduction analysis workflow:
 1. Data loading and preprocessing (AC lines, tie-lines, transformers, DC lines, converters)
 2. Island detection and original network plot (when `CONFIG.enable_plots = true`)
-3. Y-bus assembly (AC only) and export of island diagnostics, bus ID map, line details
+3. DC Laplacian assembly (AC branches, series reactance only) and export of island diagnostics, bus ID map, line details
 4. Representative node selection (auto by degree, or manual from Excel)
 5. Virtual line filter and DC capacity map construction
-6. Original network TTC/PTDF analysis (AC + additive DC, parallelised when `parallel_processing = true`)
-7. Kron reduction of non-representative nodes
-8. Reduced-network PTDF computation
-9. Optimisation of equivalent line capacities (QP / LP / MIQP via JuMP + Ipopt / HiGHS)
+6. Original network TTC/PTDF analysis for representative-node pairs (AC + additive DC, parallelised when `parallel_processing = true`)
+7. Kron reduction of non-representative nodes, then removal of virtual lines when `allow_virtual_lines = false`
+8. Reduced-network PTDF computation on the (filtered) reduced network
+9. Equivalent capacities (QP via Ipopt, LP envelope via HiGHS, MIQP via SCIP or another MIQP solver); TTC is evaluated as min(C/|PTDF|) + DC
 10. Reduced network visualisation (when `CONFIG.enable_plots = true`)
 11. TTC comparison and export of all results to CSV
 
@@ -31,6 +31,7 @@ All filenames use `CONFIG.suffix` as a postfix:
 - `PTDF_Reduced_Network_<suffix>.csv`: Reduced network PTDF values
 - `Equivalent_Capacities_<suffix>.csv`: Optimised synthetic line capacities, reactances, and DC flags
 - `TTC_Comparison_<suffix>.csv`: Comparison of original vs equivalent TTC values
+- `Solver_Diagnostics_<suffix>.csv`: MIQP solver status, bound, gap and timing
 - `Network_Original_<suffix>.png`: Original network plot (only when `enable_plots = true`)
 - `Network_Reduced_<suffix>.png`: Reduced network plot (only when `enable_plots = true`)
 - `Network_Original_vs_Reduced_<suffix>.png`: Side-by-side comparison plot (only when `enable_plots = true`)
@@ -66,6 +67,7 @@ function main_full_analysis(input_data_dir::String, output_data_dir::String)
 
     file_path = joinpath(input_data_dir, CONFIG.input_filename)
     println("Loading data from: $file_path\n")
+    mkpath(output_data_dir)
 
     # ── Step 1: Data loading & preprocessing ─────────────────────────────────
     local numbered_lines, numbered_tielines, node_info, bus_map, numbered_dclines, transformers_raw
@@ -84,6 +86,7 @@ function main_full_analysis(input_data_dir::String, output_data_dir::String)
         # node list and (b) numeric ID assignment covers only AC buses.
         converters_raw = process_converters(raw_data["converters"])
         converter_map = build_converter_map(converters_raw)
+        apply_converter_limits!(dc_lines_raw, converters_raw, CONFIG.base)
         remap_dc_endpoints!(dc_lines_raw, converter_map)
 
         # Remove DC terminal buses from the node list before assigning numeric
@@ -195,16 +198,13 @@ function main_full_analysis(input_data_dir::String, output_data_dir::String)
     _log_step("Island detection & original network plot", t2)
 
     # ── Step 3: Y-bus assembly & diagnostics ─────────────────────────────────
-    local Ybus_original
+    local Ybus_dc
     t3 = @elapsed begin
-        Ybus_original = form_ybus_with_shunt(
-            numbered_lines,
-            numbered_tielines,
-            node_info,
-            CONFIG.base,
-        )
-        n_buses = size(Ybus_original, 1)
-        println("Original Ybus (AC only): $n_buses×$n_buses")
+        # Lossless DC Laplacian (series reactances only): the single network model
+        # used for node selection, PTDFs and Kron reduction.
+        Ybus_dc = form_dc_ybus(numbered_lines, numbered_tielines, node_info, CONFIG.base)
+        n_buses = size(Ybus_dc, 1)
+        println("Original DC Ybus (AC branches only): $n_buses×$n_buses")
 
         island_diag_df, _, _ = diagnose_islands(
             numbered_lines,
@@ -233,7 +233,7 @@ function main_full_analysis(input_data_dir::String, output_data_dir::String)
     local rep_nodes_df, rep_node_ids, high_res_node_ids
     t4 = @elapsed begin
         rep_nodes_df, node_info = select_representative_nodes(
-            Ybus_original,
+            Ybus_dc,
             node_info,
             numbered_lines,
             numbered_tielines,
@@ -319,10 +319,11 @@ function main_full_analysis(input_data_dir::String, output_data_dir::String)
     t6 = @elapsed begin
         println("\n--- ORIGINAL NETWORK ANALYSIS ---")
         ttc_results, line_capacities_pu = calculate_all_ttc_results(
-            Ybus_original,
+            Ybus_dc,
             numbered_lines,
             numbered_tielines;
             dc_cap_map = dc_cap_map,
+            transaction_nodes = rep_node_ids,
         )
         println(
             "Original network TTC analysis completed: $(nrow(ttc_results)) transactions.",
@@ -331,9 +332,14 @@ function main_full_analysis(input_data_dir::String, output_data_dir::String)
     _log_step("Original network TTC/PTDF analysis", t6)
 
     # ── Step 7: Kron reduction ────────────────────────────────────────────────
+    # With virtual lines disallowed, the filtered network is the one that is
+    # exported, so its PTDFs (step 8) and reactances are what must be used.
     local Y_kron
     t7 = @elapsed begin
-        Y_kron = kron_reduce_ybus(Ybus_original, rep_node_ids)
+        Y_kron = kron_reduce_ybus(Ybus_dc, rep_node_ids)
+        if !CONFIG.allow_virtual_lines
+            Y_kron = filter_reduced_network(Y_kron, rep_node_ids, allowed_synth_pairs)
+        end
     end
     _log_step("Kron reduction", t7)
 
@@ -356,11 +362,15 @@ function main_full_analysis(input_data_dir::String, output_data_dir::String)
             ptdf_reduced_results;
             Type = CONFIG.optimisation_type,
             lambda = CONFIG.lambda,
-            allow_virtual_lines = CONFIG.allow_virtual_lines,
-            allowed_synth_pairs = allowed_synth_pairs,
             dc_cap_map = dc_cap_map,
             high_res_node_ids = high_res_node_ids,
             phys_line_caps = line_capacities_pu,
+            rep_node_ids = rep_node_ids,
+            reduced_ybus = Y_kron,
+            solver_diagnostics_path = joinpath(
+                output_data_dir,
+                "Solver_Diagnostics_$(CONFIG.suffix).csv",
+            ),
         )
 
         if !isnothing(equivalent_capacities_df)
@@ -447,12 +457,7 @@ function main_full_analysis(input_data_dir::String, output_data_dir::String)
     # ── Step 11: TTC comparison & result export ───────────────────────────────
     local bus_name_map
     t11 = @elapsed begin
-        rn_orig_ids = unique(
-            vcat(
-                ptdf_reduced_results.transaction_from_orig,
-                ptdf_reduced_results.transaction_to_orig,
-            ),
-        )
+        rn_orig_ids = rep_node_ids
         ttc_rn_original = filter(
             row ->
                 (row.transaction_from in rn_orig_ids) &&
@@ -507,6 +512,10 @@ function main_full_analysis(input_data_dir::String, output_data_dir::String)
                     :limiting_synth_line_to,
                 ],
             ]
+
+            if hasproperty(comparison_df, :in_calibration)
+                final_comparison[!, :in_calibration] = comparison_df.in_calibration
+            end
 
             println("\n")
             println("FINAL TTC COMPARISON (Canonical RN-to-RN Transactions)")

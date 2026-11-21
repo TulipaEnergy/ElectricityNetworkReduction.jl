@@ -3,10 +3,14 @@
 # ==============================================================================
 
 """
-    calculate_all_ttc_results(Ybus, lines_df, tie_lines_df; dc_cap_map)
+    calculate_all_ttc_results(Ybus, lines_df, tie_lines_df; dc_cap_map, transaction_nodes)
 
 Computes TTC for all canonical transactions (a < b) WITHOUT storing PTDFs.
 Memory-optimised for large-scale systems.
+
+Only transactions between `transaction_nodes` are enumerated (default: every
+bus). The reduction only consumes pairs of representative nodes, so passing
+them avoids an O(N²) sweep over all bus pairs on large networks.
 
 DC lines contribute additively:
     TTC(a,b) = TTC_AC(a,b) + C_DC(a,b)
@@ -24,27 +28,33 @@ object.
 # Keyword arguments
 - `dc_cap_map` : Dict{Tuple{Int,Int},Float64} from build_dc_capacity_map().
                  Keys are (min_rep_id, max_rep_id), values are capacity in pu.
+- `transaction_nodes` : bus ids whose pairwise transactions are computed
+                 (default `1:N`, i.e. all buses).
 """
 function calculate_all_ttc_results(
     Ybus::SparseMatrixCSC{ComplexF64},
     lines_df::DataFrame,
     tie_lines_df::DataFrame;
     dc_cap_map::Dict{Tuple{Int,Int},Float64} = Dict{Tuple{Int,Int},Float64}(),
+    transaction_nodes::AbstractVector{<:Integer} = 1:size(Ybus, 1),
 )
     N = size(Ybus, 1)
 
-    # 1. Build bidirectional capacity lookup (AC lines only).
-    #    Parallel branches between the same bus pair are aggregated into a single
-    #    equivalent line in Ybus (admittances summed), so their capacities must be
-    #    summed here too — otherwise the TTC limit silently reflects only the last
-    #    branch iterated instead of the combined thermal rating.
+    # Parallel branches share an angle difference. Preserve the tightest
+    # individual thermal constraint: C_pair = sum(b_i) * min(C_i / b_i).
+    # Summing ratings is exact only when ratings are proportional to b_i.
     all_lines = vcat(lines_df, tie_lines_df, cols = :union)
     line_caps = Dict{Tuple{Int,Int},Float64}()
+    pair_b = Dict{Tuple{Int,Int},Float64}()
+    pair_angle = Dict{Tuple{Int,Int},Float64}()
     for l in eachrow(all_lines)
-        key = (Int(l.From), Int(l.To))
-        line_caps[key] = get(line_caps, key, 0.0) + Float64(l.Capacity_pu)
-        rkey = (Int(l.To), Int(l.From))
-        line_caps[rkey] = get(line_caps, rkey, 0.0) + Float64(l.Capacity_pu)
+        key = minmax(Int(l.From), Int(l.To))
+        b = 1.0 / Float64(l.X_pu)
+        pair_b[key] = get(pair_b, key, 0.0) + b
+        pair_angle[key] = min(get(pair_angle, key, Inf), Float64(l.Capacity_pu) / b)
+    end
+    for (key, b) in pair_b
+        line_caps[key] = line_caps[reverse(key)] = b * pair_angle[key]
     end
 
     # 2. Build PTDF basis — always sequential (UMFPACK back-solves are not
@@ -54,15 +64,19 @@ function calculate_all_ttc_results(
 
     # 3. Pre-generate flat pair arrays so the parallel loop uses a 1-D index.
     #    This avoids nested-loop indexing and allows @threads to split the work.
-    total = N * (N - 1) ÷ 2
+    nodes = sort!(unique(Int.(transaction_nodes)))
+    all(n -> 1 <= n <= N, nodes) ||
+        throw(ArgumentError("transaction_nodes must be bus ids in 1:$N"))
+    n_nodes = length(nodes)
+    total = n_nodes * (n_nodes - 1) ÷ 2
     n_lines = length(lines_info)
     pairs_a = Vector{Int}(undef, total)
     pairs_b = Vector{Int}(undef, total)
     let idx = 0
-        for a = 1:N, b = (a+1):N
+        for i = 1:n_nodes, j = (i+1):n_nodes
             idx += 1
-            pairs_a[idx] = a
-            pairs_b[idx] = b
+            pairs_a[idx] = nodes[i]
+            pairs_b[idx] = nodes[j]
         end
     end
 
@@ -76,9 +90,18 @@ function calculate_all_ttc_results(
     # 5. Per-thread scratch buffers for the ptdf difference vector.
     #    Eliminates the per-iteration heap allocation of `ptdf_a .- ptdf_b`
     #    (which otherwise creates ~180 GB of GC pressure for a 3000-bus network).
-    use_parallel = CONFIG.parallel_processing && Threads.nthreads() > 1
+    #    `total == 0` (a single-node network) is routed to the sequential path:
+    #    its loop is simply empty, whereas the chunked parallel path would divide
+    #    by a zero chunk count.
+    use_parallel = CONFIG.parallel_processing && Threads.nthreads() > 1 && total > 0
     n_threads = use_parallel ? Threads.nthreads() : 1
-    ptdf_bufs = [Vector{Float64}(undef, n_lines) for _ = 1:n_threads]
+    #    Buffers are indexed by `threadid()`, which is NOT bounded by `nthreads()`:
+    #    `nthreads()` counts only the `:default` pool, but when an interactive pool
+    #    exists (`julia -t N,M`, the VS Code Julia default, or `-t auto` on newer
+    #    versions) `@threads` tasks run on ids above that count. Sizing by
+    #    `nthreads()` therefore throws BoundsError. `maxthreadid()` covers all pools.
+    n_buffers = use_parallel ? Threads.maxthreadid() : 1
+    ptdf_bufs = [Vector{Float64}(undef, n_lines) for _ = 1:n_buffers]
 
     if CONFIG.parallel_processing && Threads.nthreads() == 1
         @warn "parallel_processing = true but Julia is running with only 1 thread.  " *
@@ -224,6 +247,12 @@ function calculate_single_injection_ptdfs(
 )
     N = size(Ybus, 1)
     B = -imag(Ybus)
+    scale = max(1.0, maximum(abs, B))
+    maximum(abs, vec(sum(B; dims = 2))) <= 1e-10 * scale || throw(
+        ArgumentError(
+            "PTDFs require a DC Laplacian with zero row sums. Use form_dc_ybus, not the AC admittance matrix with shunts.",
+        ),
+    )
 
     # --- Detect AC connected components from B matrix sparsity ---
     g = SimpleGraph(N)
@@ -260,7 +289,9 @@ function calculate_single_injection_ptdfs(
 
     # Factorise the reduced B matrix (block-diagonal, non-singular when one ref per island)
     B_red = B[non_ref, non_ref]
-    B_fact = lu(B_red)
+    # An entirely isolated/DC-only network has one reference per bus and no
+    # non-reference angles to solve. UMFPACK cannot factor a 0-by-0 matrix.
+    B_fact = isempty(non_ref) ? nothing : lu(B_red)
 
     # Extract lines efficiently from sparse structure
     lines = Vector{Tuple{Int,Int,Float64}}()
@@ -288,7 +319,7 @@ function calculate_single_injection_ptdfs(
         theta_full[non_ref] .= theta_red
 
         # Store impact on all lines for this injection
-        ptdf_single[b] = [bij * (theta_full[i] - theta_full[j]) for (i, j, bij) in lines]
+        ptdf_single[b] = [-bij * (theta_full[i] - theta_full[j]) for (i, j, bij) in lines]
     end
 
     return ptdf_single, lines, node_component
@@ -318,7 +349,7 @@ function _calculate_ttc_internal!(
 
     @inbounds for (k, (i, j, _)) in enumerate(lines_info)
         p = buf[k]
-        abs(p) < 1e-10 && continue
+        abs(p) <= CONFIG.ptdf_epsilon && continue
 
         cap = get(line_caps, (i, j), get(line_caps, (j, i), Inf))
         val = cap / abs(p)
@@ -342,7 +373,10 @@ When `high_res_ids` is non-empty (high-resolution zone mode), pairs where
 **both** endpoints are in the high-res set are skipped: their PTDFs are
 determined by the original physical network, and including them would make
 the computation O(n_hires²) — infeasible for large zones. Cross-boundary
-and external-only pairs are still computed normally.
+and external-only pairs are still computed normally. If every retained bus is
+high-resolution, all connected transactions are evaluated so the unchanged
+physical network can be exported and checked. Cross-island transactions have
+no AC PTDF rows; the capacity evaluator reports zero AC transfer for a lost path.
 """
 function calculate_ptdfs_reduced(
     Y_kron::SparseMatrixCSC{ComplexF64},
@@ -352,7 +386,7 @@ function calculate_ptdfs_reduced(
     N_R = length(rep_node_ids)
 
     # 1. Calculate basis using the reduced matrix (indices 1 to N_R)
-    ptdf_single, lines_info, _ = calculate_single_injection_ptdfs(Y_kron)
+    ptdf_single, lines_info, node_component = calculate_single_injection_ptdfs(Y_kron)
 
     results = DataFrame(
         transaction_from_orig = Int[],
@@ -362,7 +396,9 @@ function calculate_ptdfs_reduced(
         PTDF_value = Float64[],
     )
 
-    skip_intra = !isempty(high_res_ids)
+    # With every bus retained, evaluate the physical network directly rather
+    # than skipping every transaction and leaving an empty optimisation input.
+    skip_intra = !isempty(high_res_ids) && !all(in(high_res_ids), rep_node_ids)
     n_skipped = 0
 
     # 2. Iterate using local indices (1 to N_R)
@@ -370,6 +406,10 @@ function calculate_ptdfs_reduced(
         for b_local = (a_local+1):N_R
             id_a = rep_node_ids[a_local]
             id_b = rep_node_ids[b_local]
+
+            # Separate island reference injections do not represent a balanced
+            # transfer between islands. Such a transaction has no AC path.
+            node_component[a_local] == node_component[b_local] || continue
 
             # Skip intra-high-res pairs — handled via original network TTC
             if skip_intra && (id_a in high_res_ids) && (id_b in high_res_ids)
